@@ -41,6 +41,8 @@ def main():
             'revision': probe(['git', 'rev-parse', 'HEAD']), 'working_tree': probe(['git', 'status', '--porcelain']),
             'rustc': probe(['rustc', '-Vv']), 'inventory': inventory,
             'fixture_sha256': hashlib.sha256(fixture.read_bytes()).hexdigest(),
+            'implementation_source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(Path('crates').glob('*/src/**/*.rs'))},
             'test_source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (
                 Path('crates/mini-vllm-model/tests/reference.rs'), Path('crates/mini-vllm-engine/tests/engine.rs'))},
             'results': []}

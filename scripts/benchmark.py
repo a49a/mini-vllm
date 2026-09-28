@@ -54,8 +54,8 @@ def consume_sse(response, start, clock=time.perf_counter):
             'tokens': usage['completion_tokens'], 'finish': finish}
 
 
-def stream_one(host, port, prompt, max_tokens):
-    conn = http.client.HTTPConnection(host, port, timeout=600)
+def stream_one(host, port, prompt, max_tokens, timeout=600):
+    conn = http.client.HTTPConnection(host, port, timeout=timeout)
     start = time.perf_counter()
     try:
         conn.request('POST', '/v1/completions', body=json.dumps({
