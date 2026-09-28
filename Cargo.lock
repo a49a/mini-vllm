@@ -1368,6 +1368,7 @@ dependencies = [
  "mini-vllm-model",
  "mini-vllm-server",
  "mini-vllm-tokenizer",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

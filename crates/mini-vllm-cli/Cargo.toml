@@ -31,3 +31,7 @@ tracing-subscriber = { workspace = true }
 # Metal is enabled by default on macOS builds.
 [target.'cfg(target_os = "macos")'.dependencies]
 mini-vllm-model = { workspace = true, features = ["metal"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+mini-vllm-tokenizer = { workspace = true, features = ["test-util"] }
