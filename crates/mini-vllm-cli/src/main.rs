@@ -1,5 +1,7 @@
 //! `mini-vllm` CLI: inspect / generate / serve.
 
+mod runtime;
+
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -351,6 +353,7 @@ fn cmd_serve(args: Command) -> Result<()> {
         paged_kv: !contiguous_kv,
         ..EngineConfig::default()
     };
+    let runtime = runtime::BoundedRuntime::new().context("building tokio runtime")?;
     let handle = mini_vllm_engine::spawn_engine(
         Arc::new(loaded),
         Some(Arc::clone(&tokenizer)),
@@ -367,8 +370,8 @@ fn cmd_serve(args: Command) -> Result<()> {
         vocab_size,
     });
 
-    let runtime = tokio::runtime::Runtime::new().context("building tokio runtime")?;
-    runtime.block_on(async move {
+    let cleanup_handle = handle.clone();
+    let result = runtime.block_on(async move {
         let app = mini_vllm_server::routes::router_with_preprocessing(state, preprocessing_config)
             .map_err(anyhow::Error::msg)?;
         let addr: SocketAddr = format!("{host}:{port}")
@@ -394,12 +397,21 @@ fn cmd_serve(args: Command) -> Result<()> {
             Ok(result) => result??,
             Err(_) => { abort.abort(); handle.request_shutdown(mini_vllm_engine::ShutdownMode::Cancel, std::time::Duration::ZERO); }
         }
-        handle.request_shutdown(mini_vllm_engine::ShutdownMode::Cancel, std::time::Duration::ZERO);
-        tokio::task::spawn_blocking(move || handle.join(std::time::Duration::from_secs(5))).await?
-            .map_err(anyhow::Error::msg)?;
-        tracing::info!("server drained; exiting");
         Ok::<(), anyhow::Error>(())
-    })?;
+    });
+    // Join directly outside Tokio: queued blocking jobs cannot delay cleanup.
+    // Do this even if binding or transport handling returned an error.
+    cleanup_handle.request_shutdown(
+        mini_vllm_engine::ShutdownMode::Cancel,
+        std::time::Duration::ZERO,
+    );
+    let joined = cleanup_handle
+        .join(std::time::Duration::from_secs(5))
+        .map_err(anyhow::Error::msg);
+    drop(runtime);
+    result?;
+    joined?;
+    tracing::info!("server drained; exiting");
     Ok(())
 }
 
