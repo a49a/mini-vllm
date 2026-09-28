@@ -26,6 +26,17 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace
+      - name: Explore lifecycle sequences with a per-run seed
+        env:
+          MINI_VLLM_LIFECYCLE_SEED: ${{ github.run_id }}
+        run: cargo test --locked -p mini-vllm-engine --test state_machine
       - run: cargo run --locked -p mini-vllm-engine --example prefix_metadata
       - run: python3 -m unittest discover -s scripts/tests -v
       - run: python3 scripts/check_docs.py
+      - name: Preserve reduced lifecycle failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-failures-${{ matrix.os }}
+          path: target/lifecycle-failures/
+          if-no-files-found: ignore
