@@ -1,11 +1,14 @@
 //! Block-keyed prefix trie. Each node owns one unique block across all layers;
 //! nodes retain only their own pages. Only unpinned leaves can be evicted.
 use mini_vllm_kv::KvCache;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 struct Node {
     parent: Option<usize>,
-    block: Vec<u32>,
+    block: Arc<[u32]>,
     depth: usize,
     children: usize,
     used: u64,
@@ -13,7 +16,8 @@ struct Node {
     pin: Arc<()>,
 }
 pub struct PrefixCache {
-    index: HashMap<(Option<usize>, Vec<u32>), usize>,
+    index: HashMap<Option<usize>, HashMap<Arc<[u32]>, usize>>,
+    leaves: BTreeSet<(u64, usize)>,
     nodes: HashMap<usize, Node>,
     block_size: usize,
     max_blocks: usize,
@@ -24,6 +28,7 @@ impl PrefixCache {
     pub fn new(block_size: usize, tokens: usize) -> Self {
         Self {
             index: HashMap::new(),
+            leaves: BTreeSet::new(),
             nodes: HashMap::new(),
             block_size,
             max_blocks: tokens / block_size,
@@ -37,11 +42,35 @@ impl PrefixCache {
     pub fn clear(&mut self) {
         self.nodes.clear();
         self.index.clear();
+        self.leaves.clear();
+    }
+    fn lookup(&self, parent: Option<usize>, block: &[u32]) -> Option<&usize> {
+        self.index.get(&parent)?.get(block)
+    }
+    fn touch(&mut self, id: usize) {
+        let node = self.nodes.get_mut(&id).unwrap();
+        if node.children == 0 {
+            self.leaves.remove(&(node.used, id));
+            self.leaves.insert((self.clock, id));
+        }
+        node.used = self.clock;
+    }
+    /// Logical retained metadata, independent of model weights and tensor sizes.
+    /// These counts are not allocator bytes or process RSS.
+    pub fn metadata_counts(&self) -> (usize, usize, usize) {
+        (
+            self.nodes.len(),
+            self.nodes.values().map(|n| n.block.len()).sum(),
+            self.nodes
+                .values()
+                .map(|n| n.cache.page_table_entries())
+                .sum(),
+        )
     }
     fn find(&self, prompt: &[u32]) -> Option<usize> {
         let mut parent = None;
         for block in prompt[..prompt.len().saturating_sub(1)].chunks_exact(self.block_size) {
-            match self.index.get(&(parent, block.to_vec())) {
+            match self.lookup(parent, block) {
                 Some(&id) => parent = Some(id),
                 None => break,
             }
@@ -62,8 +91,8 @@ impl PrefixCache {
             return Ok(None);
         };
         self.clock += 1;
-        let node = self.nodes.get_mut(&id).unwrap();
-        node.used = self.clock;
+        self.touch(id);
+        let node = &self.nodes[&id];
         let pin = node.pin.clone();
         let mut path = vec![id];
         let mut parent = node.parent;
@@ -81,21 +110,27 @@ impl PrefixCache {
         Ok(Some((cache, pin)))
     }
     fn evict_leaf(&mut self, protected: Option<usize>) -> bool {
-        let victim = self
-            .nodes
-            .iter()
-            .filter(|(id, n)| {
-                Some(**id) != protected && n.children == 0 && Arc::strong_count(&n.pin) == 1
-            })
-            .min_by_key(|(_, n)| n.used)
-            .map(|(&id, _)| id);
+        // Pinned leaves stay indexed: dropping a borrow needs no mutation here.
+        // Search only leaves in LRU order, never the trie interior.
+        let victim = self.leaves.iter().find_map(|&(_, id)| {
+            (Some(id) != protected && Arc::strong_count(&self.nodes[&id].pin) == 1).then_some(id)
+        });
         let Some(id) = victim else {
             return false;
         };
         let node = self.nodes.remove(&id).unwrap();
-        self.index.remove(&(node.parent, node.block));
+        self.leaves.remove(&(node.used, id));
+        let siblings = self.index.get_mut(&node.parent).unwrap();
+        siblings.remove(node.block.as_ref());
+        if siblings.is_empty() {
+            self.index.remove(&node.parent);
+        }
         if let Some(parent) = node.parent {
-            self.nodes.get_mut(&parent).unwrap().children -= 1;
+            let ancestor = self.nodes.get_mut(&parent).unwrap();
+            ancestor.children -= 1;
+            if ancestor.children == 0 {
+                self.leaves.insert((ancestor.used, parent));
+            }
         }
         true
     }
@@ -105,11 +140,10 @@ impl PrefixCache {
         }
         let mut parent = None;
         for (i, block) in tokens.chunks_exact(self.block_size).enumerate() {
-            let key = (parent, block.to_vec());
             self.clock += 1;
-            if let Some(&id) = self.index.get(&key) {
-                let node = self.nodes.get_mut(&id).unwrap();
-                node.used = self.clock;
+            if let Some(&id) = self.lookup(parent, block) {
+                self.touch(id);
+                let node = &self.nodes[&id];
                 // Concurrent cold requests may have computed identical history.
                 // Canonicalize before adding any descendants, so accounting
                 // reflects unique tensors rather than overlapping snapshots.
@@ -126,13 +160,16 @@ impl PrefixCache {
             let id = self.next;
             self.next += 1;
             if let Some(parent) = parent {
-                self.nodes.get_mut(&parent).unwrap().children += 1;
+                let ancestor = self.nodes.get_mut(&parent).unwrap();
+                self.leaves.remove(&(ancestor.used, parent));
+                ancestor.children += 1;
             }
+            let block: Arc<[u32]> = block.into();
             self.nodes.insert(
                 id,
                 Node {
                     parent,
-                    block: block.to_vec(),
+                    block: block.clone(),
                     depth: i + 1,
                     children: 0,
                     used: self.clock,
@@ -140,7 +177,8 @@ impl PrefixCache {
                     pin: Arc::new(()),
                 },
             );
-            self.index.insert(key, id);
+            self.index.entry(parent).or_default().insert(block, id);
+            self.leaves.insert((self.clock, id));
             parent = Some(id);
         }
         Ok(())
@@ -228,5 +266,23 @@ mod tests {
             .flat_map(|(k, _)| k.flatten_all().unwrap().to_vec1::<f32>().unwrap())
             .collect();
         assert_eq!(flattened, vec![1., 2., 3., 4., 5., 6., 7.]);
+    }
+    #[test]
+    fn lru_refresh_and_parent_promotion_preserve_eviction_order() {
+        let mut trie = PrefixCache::new(2, 6);
+        trie.insert(&[1, 2, 3, 4], &mut cache(4)).unwrap();
+        trie.insert(&[5, 6], &mut cache(2)).unwrap();
+        let (_, pin) = trie.borrow(&[1, 2, 3, 4, 0], 16).unwrap().unwrap();
+        drop(pin);
+        trie.insert(&[7, 8], &mut cache(2)).unwrap();
+        assert_eq!(trie.matched_tokens(&[5, 6, 0]), 0);
+        assert!(trie.evict_leaf(None)); // [3,4] is now the oldest leaf.
+        assert_eq!(trie.matched_tokens(&[1, 2, 3, 4, 0]), 2);
+        assert!(trie.evict_leaf(None)); // promoted [1,2] retains its old age.
+        assert_eq!(trie.matched_tokens(&[1, 2, 0]), 0);
+        assert_eq!(trie.matched_tokens(&[7, 8, 0]), 2);
+        trie.clear();
+        assert!(trie.leaves.is_empty());
+        assert!(trie.index.is_empty());
     }
 }
