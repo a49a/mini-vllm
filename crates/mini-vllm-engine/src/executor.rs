@@ -69,6 +69,11 @@ impl Executor {
             }
             input.seq_lens.push(n);
         }
+        let selected: Vec<_> = sample
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &needed)| needed.then_some(i))
+            .collect();
         let mut caches: Vec<_> = seqs
             .iter_mut()
             .map(|s| s.take_cache().expect("admitted cache"))
@@ -76,10 +81,19 @@ impl Executor {
         let lengths: Vec<_> = caches.iter().map(|c| c.seq_len()).collect();
         let result = self
             .model
-            .forward_cached(&input, &mut caches)
-            .and_then(|t| f32_rows(&t))
+            .forward_cached_selected(&input, &mut caches, &selected)
+            .and_then(|t| {
+                if t.dims() != [selected.len(), self.model.vocab_size()] {
+                    candle_core::bail!("invalid selected logits shape");
+                }
+                if selected.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    f32_rows(&t)
+                }
+            })
             .and_then(|rows| {
-                if rows.len() != seqs.len()
+                if rows.len() != selected.len()
                     || rows.iter().any(|r| {
                         r.len() != self.model.vocab_size() || r.iter().any(|v| !v.is_finite())
                     })
@@ -106,12 +120,11 @@ impl Executor {
         for (seq, cache) in seqs.iter_mut().zip(caches) {
             seq.restore_cache(cache);
         }
-        Ok(seqs
-            .iter_mut()
-            .zip(result?)
-            .zip(sample)
-            .map(|((seq, row), sample)| sample.then(|| seq.sample_next(&row)))
-            .collect())
+        let mut tokens = vec![None; seqs.len()];
+        for (index, row) in selected.into_iter().zip(result?) {
+            tokens[index] = Some(seqs[index].sample_next(&row));
+        }
+        Ok(tokens)
     }
 
     /// Prefill one sequence: run the whole prompt through the model, fill

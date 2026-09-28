@@ -179,6 +179,7 @@ impl Qwen2 {
         seq_lens: &[usize],
         mut caches: Option<&mut [KvCache]>,
         all_logits: bool,
+        logits_sequences: Option<&[usize]>,
     ) -> Result<Tensor> {
         if token_ids.len() != positions.len()
             || token_ids.is_empty()
@@ -199,6 +200,9 @@ impl Qwen2 {
         {
             candle_core::bail!("token or position out of range");
         }
+        if logits_sequences.is_some_and(|rows| rows.iter().any(|&i| i >= seq_lens.len())) {
+            candle_core::bail!("logits sequence index out of range");
+        }
         let total = token_ids.len();
         let ids = Tensor::from_vec(token_ids.to_vec(), (total,), &self.device)?;
         let mut x = self.embed_tokens.index_select(&ids, 0)?; // [total, hidden]
@@ -213,8 +217,10 @@ impl Qwen2 {
             let mlp = layer.mlp.forward(&h)?;
             x = x.add(&mlp)?;
         }
-        let x = self.norm.forward(&x)?;
-
+        // Intermediate prefill still updates every KV layer, but needs no LM head.
+        if logits_sequences.is_some_and(|rows| rows.is_empty()) {
+            return Tensor::zeros((0, self.cfg.vocab_size), self.dtype, &self.device);
+        }
         let final_hidden = if all_logits {
             x
         } else {
@@ -225,10 +231,15 @@ impl Qwen2 {
                 rows.push((off + len - 1) as u32);
                 off += len;
             }
-            let idx = Tensor::from_vec(rows, (seq_lens.len(),), &self.device)?;
+            if let Some(selected) = logits_sequences {
+                rows = selected.iter().map(|&i| rows[i]).collect();
+            }
+            let count = rows.len();
+            let idx = Tensor::from_vec(rows, (count,), &self.device)?;
             x.index_select(&idx, 0)?
         };
 
+        let final_hidden = self.norm.forward(&final_hidden)?;
         match &self.lm_head {
             Some(head) => head.forward(&final_hidden),
             None => final_hidden.matmul(&self.embed_tokens.t()?),
@@ -250,6 +261,31 @@ pub trait CausalLm: Send + Sync {
     /// Cached forward: mixed prefill/decode batch over per-sequence KV
     /// caches. Returns `[num_seqs, vocab]` last-token logits.
     fn forward_cached(&self, input: &BatchTokens, caches: &mut [KvCache]) -> Result<Tensor>;
+
+    /// Update all caches, returning last-token logits only for selected sequence
+    /// indices in the requested order. An empty selection returns `[0, vocab]`.
+    /// The default keeps third-party/reference models compatible; optimized
+    /// models override this to skip the unused projection entirely.
+    fn forward_cached_selected(
+        &self,
+        input: &BatchTokens,
+        caches: &mut [KvCache],
+        sequences: &[usize],
+    ) -> Result<Tensor> {
+        if sequences.iter().any(|&i| i >= input.seq_lens.len()) {
+            candle_core::bail!("logits sequence index out of range");
+        }
+        let logits = self.forward_cached(input, caches)?;
+        if sequences.is_empty() {
+            return Tensor::zeros((0, self.vocab_size()), logits.dtype(), logits.device());
+        }
+        let indices = Tensor::from_vec(
+            sequences.iter().map(|&i| i as u32).collect::<Vec<_>>(),
+            sequences.len(),
+            logits.device(),
+        )?;
+        logits.index_select(&indices, 0)
+    }
 
     /// Correctness-first reference path with no KV cache: run the entire
     /// sequence, return `[seq_len, vocab]` logits for every position.
@@ -280,12 +316,29 @@ impl CausalLm for Qwen2 {
             &input.seq_lens,
             Some(caches),
             false,
+            None,
+        )
+    }
+
+    fn forward_cached_selected(
+        &self,
+        input: &BatchTokens,
+        caches: &mut [KvCache],
+        sequences: &[usize],
+    ) -> Result<Tensor> {
+        self.forward_impl(
+            &input.token_ids,
+            &input.positions,
+            &input.seq_lens,
+            Some(caches),
+            false,
+            Some(sequences),
         )
     }
 
     fn forward_nocache(&self, token_ids: &[u32], positions: &[u32]) -> Result<Tensor> {
         let seq_lens = vec![token_ids.len()];
-        self.forward_impl(token_ids, positions, &seq_lens, None, true)
+        self.forward_impl(token_ids, positions, &seq_lens, None, true, None)
     }
 }
 
@@ -297,6 +350,88 @@ mod tests {
 
     fn model() -> Qwen2 {
         random_model(&Device::Cpu)
+    }
+
+    #[test]
+    fn selected_logits_preserve_rows_and_intermediate_prefill_cache() {
+        for tied in [false, true] {
+            let mut cfg = crate::testutil::tiny_config();
+            cfg.tie_word_embeddings = tied;
+            let model = Qwen2::load(
+                cfg.clone(),
+                &crate::testutil::random_tensors(&cfg, !tied, &Device::Cpu),
+                DType::F32,
+                &Device::Cpu,
+            )
+            .unwrap();
+            for paged in [false, true] {
+                let make = || {
+                    if paged {
+                        KvCache::new_paged(cfg.num_hidden_layers, 16, 2).unwrap()
+                    } else {
+                        kv_cache_for(&model, 16)
+                    }
+                };
+                let input = BatchTokens {
+                    token_ids: vec![4, 5, 6, 7, 8],
+                    positions: vec![0, 1, 2, 0, 1],
+                    seq_lens: vec![3, 2],
+                };
+                let mut reference = [make(), make()];
+                let full = model
+                    .forward_cached(&input, &mut reference)
+                    .unwrap()
+                    .to_vec2::<f32>()
+                    .unwrap();
+                for selection in [vec![], vec![1], vec![1, 0]] {
+                    let mut caches = [make(), make()];
+                    let logits = model
+                        .forward_cached_selected(&input, &mut caches, &selection)
+                        .unwrap();
+                    assert_eq!(logits.dims(), &[selection.len(), cfg.vocab_size]);
+                    if !selection.is_empty() {
+                        for (row, &index) in logits.to_vec2::<f32>().unwrap().iter().zip(&selection)
+                        {
+                            assert!(row
+                                .iter()
+                                .zip(&full[index])
+                                .all(|(a, b)| (a - b).abs() < 1e-4));
+                        }
+                    }
+                    assert_eq!(caches[0].seq_len(), 3);
+                    assert_eq!(caches[1].seq_len(), 2);
+                    // Compare a subsequent mixed decode against independently
+                    // rebuilt caches, including when no earlier logits existed.
+                    let next = BatchTokens {
+                        token_ids: vec![9, 10],
+                        positions: vec![3, 2],
+                        seq_lens: vec![1, 1],
+                    };
+                    let mut expected = [make(), make()];
+                    model.forward_cached(&input, &mut expected).unwrap();
+                    let a = model
+                        .forward_cached_selected(&next, &mut caches, &[0, 1])
+                        .unwrap()
+                        .to_vec2::<f32>()
+                        .unwrap();
+                    let b = model
+                        .forward_cached(&next, &mut expected)
+                        .unwrap()
+                        .to_vec2::<f32>()
+                        .unwrap();
+                    assert!(a
+                        .iter()
+                        .flatten()
+                        .zip(b.iter().flatten())
+                        .all(|(a, b)| (a - b).abs() < 1e-4));
+                }
+                let mut caches = [make(), make()];
+                assert!(model
+                    .forward_cached_selected(&input, &mut caches, &[2])
+                    .is_err());
+                assert_eq!(caches[0].seq_len(), 0, "validate before modifying KV");
+            }
+        }
     }
 
     /// §52.4 — the critical equivalence test: cached prefill + incremental

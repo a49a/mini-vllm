@@ -84,7 +84,7 @@ fn check_on(
     for (actual, expected) in full.iter().zip(&reference.rows) {
         compare(actual, expected, tolerance.unwrap_or(reference.atol));
     }
-    for paged in [false, true] {
+    for (paged, selective) in [(false, false), (true, false), (false, true), (true, true)] {
         let cfg = model.config();
         let mut cache = if paged {
             KvCache::new_paged(cfg.num_hidden_layers, 16, 3).unwrap()
@@ -107,18 +107,34 @@ fn check_on(
                 positions: positions[start..end].to_vec(),
                 seq_lens: vec![count],
             };
-            let logits = model
-                .forward_cached(&batch, std::slice::from_mut(&mut cache))
-                .unwrap()
-                .to_dtype(DType::F32)
-                .unwrap()
-                .to_vec2::<f32>()
-                .unwrap();
-            compare(
-                &logits[0],
-                &reference.rows[end - 1],
-                tolerance.unwrap_or(reference.atol),
-            );
+            let logits = if selective {
+                model
+                    .forward_cached_selected(
+                        &batch,
+                        std::slice::from_mut(&mut cache),
+                        if start == 0 { &[] } else { &[0] },
+                    )
+                    .unwrap()
+            } else {
+                model
+                    .forward_cached(&batch, std::slice::from_mut(&mut cache))
+                    .unwrap()
+            };
+            if selective && start == 0 {
+                assert_eq!(logits.dims(), &[0, model.vocab_size()]);
+                assert_eq!(cache.seq_len(), end);
+            } else {
+                let logits = logits
+                    .to_dtype(DType::F32)
+                    .unwrap()
+                    .to_vec2::<f32>()
+                    .unwrap();
+                compare(
+                    &logits[0],
+                    &reference.rows[end - 1],
+                    tolerance.unwrap_or(reference.atol),
+                );
+            }
             if paged && end == 3 {
                 cache = cache.fork_prefix(3, 16).unwrap();
             }
