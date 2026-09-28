@@ -5,10 +5,16 @@
 This document records the implemented behavior after the runtime expansion.
 本文记录调度、容量、输出交付与分页缓存完善后的实际行为。
 
+See [advanced experiments / 进阶实验](ADVANCED_RUNTIME.md) for current defaults, deadlines, block-trie accounting, online softmax, JSONL replay and load/device matrices.
+
 ## Runtime controls / 运行参数
 
 | CLI option | Default | Meaning / 含义 |
 |---|---:|---|
+| `--default-max-new-tokens` | 512 | HTTP default from engine configuration / 引擎配置中的 HTTP 默认生成长度 |
+| `--queue-timeout-ms` | 0 | Submission to admission; 0 disables / 准入前超时，0 禁用 |
+| `--request-timeout-ms` | 0 | Submission through generation; 0 disables / 请求总生成期限，0 禁用 |
+| `--trace-jsonl` | none | New JSONL teaching trace file / 新建 JSONL 教学追踪文件 |
 | `--max-batch-tokens` | 2048 | Combined input-token budget for one mixed model call / 每次混合调用的总输入 token 预算 |
 | `--max-prefill-chunk-tokens` | 256 | Round-robin prefill slice cap / 轮转 prefill 分块上限 |
 | `--trace-request` | false | Request scheduling/state traces / 请求调度与状态追踪 |
@@ -18,7 +24,7 @@ This document records the implemented behavior after the runtime expansion.
 | `--output-drain-timeout-ms` | 1000 | Grace after releasing KV / 释放 KV 后的输出交付宽限期 |
 | `--max-kv-tokens` | 32768 | Active suffix horizon reservations / 活动请求扣除命中前缀后的跨度预算 |
 | `--kv-block-size` | 16 | Physical page and logical accounting block size / 物理页和记账块大小 |
-| `--prefix-cache-tokens` | 0 | Additional bounded LRU retention budget / 额外前缀保留预算，0 禁用 |
+| `--prefix-cache-tokens` | 0 | Additional bounded unique-prefix-block budget / 额外前缀保留预算，0 禁用 |
 | `--contiguous-kv` | false | Select contiguous reference storage / 使用连续存储参考路径 |
 
 `spawn_engine` is now fallible: Rust callers handle `Result<EngineHandle>`.
@@ -40,17 +46,16 @@ the budget, selection rotates. If the budget is greater than one, pending
 prefill receives at least one token of budget. With budget one, decode and prefill alternate. Prefill selection rotates and each chunk is capped by `max_prefill_chunk_tokens`.
 
 物理分页由每层的页列表实现；attention 分页读取 K/V，跨页统一归一化 scores，
-再累加输出。它没有融合 GPU kernel，也不宣称具有生产 vLLM 的性能。scores 仍会
-按总上下文长度分配；这个实现主要用于学习与数值验证。
+再累加输出。它没有融合 GPU kernel，也不宣称具有生产 vLLM 的性能。scores 现在逐页生成，用在线 softmax 累加，不再保留完整上下文 scores；这个实现主要用于学习与数值验证。
 
 Pages are immutable once shared. An exclusive partial page is appended in place; a shared partial page is copied before writing. Pages allocate a full block, and readers see only the valid prefix;
-full prefix pages are shared by reference count. The LRU stores only complete
+full prefix pages are shared by reference count. The block trie stores only complete
 block-aligned prefixes and leaves at least one prompt token to regenerate logits.
 Evicting a snapshot or cancelling a sequence cannot invalidate another owner's pages.
 The cache belongs to one model instance, so prefixes cannot cross model identities.
 
 `max_kv_tokens` and `prefix_cache_tokens` are **separate** budgets. Active requests
-reserve `ceil((prompt + max_new - shared_prefix) / block_size)` blocks. A reference-counted pin keeps the reused prefix charged to the retention pool until the active cache is released. Pinned entries cannot be evicted; insertion is skipped if no unpinned entry can make room. Thus hits improve admission capacity without losing accounting when another request attempts eviction. Cold requests still must fit the active pool on their own. Shared snapshots are conservatively charged per retained prefix (overlapping snapshots may double-count). Allocator overhead,
+reserve `ceil((prompt + max_new - shared_prefix) / block_size)` blocks. A reference-counted pin keeps the reused prefix charged to the retention pool until the active cache is released. Pinned nodes and ancestors with descendants cannot be evicted; insertion stops if no unpinned leaf can make room. Thus hits improve admission capacity without losing accounting when another request attempts eviction. Cold requests still must fit the active pool on their own. The block trie charges each retained canonical block once, including ancestors shared by overlapping prefixes. Allocator overhead,
 weights, temporary scores, and short-lived COW buffers are outside token budgets.
 The logical block manager is not a global physical-page arena.
 
@@ -69,8 +74,8 @@ finish_reason、usage 和无 error 帧。失败请求单列，不计入成功吞
 
 - `tokens_per_second`: recent ten-second generated-token rate, including work
   later cancelled; `lifetime_tokens_per_second`: generated tokens / uptime.
-- `requests_finishing`: output draining requests; `cached_prefix_tokens`: LRU
-  retention accounting; `prefix_cache_hit_tokens`: reused prompt positions.
+- `requests_finishing`: output draining requests; `cached_prefix_tokens`: unique retained block
+  accounting; `prefix_cache_hit_tokens`: reused prompt positions.
 - `scheduled_tokens_total / model_steps_total`: combined scheduled input work;
   failed batch retries are additional execution work, not additional scheduling.
 - Engine TTFT starts when sequence state is created. Client TTFT starts before
@@ -129,7 +134,7 @@ opt-in because weights are not committed; the tiny independent reference runs
 in ordinary CI. HTTP integration tests exercise actual tokenizer → engine →
 Qwen2 → JSON/SSE, in addition to protocol mocks and cancellation tests.
 
-Remaining performance work includes fused GPU page attention, prefix lookup indexing, and quantization. GPU verification requires hardware visible to the process; passing CPU tests is not GPU verification.
+Remaining performance work includes fused GPU page attention and quantization. GPU verification requires hardware visible to the process; passing CPU tests is not GPU verification.
 
 ## Compatibility, failures and shutdown / 兼容性、失败与关闭
 
@@ -174,4 +179,4 @@ The opt-in numerical test checks all tiny-fixture logits, argmax, contiguous/pag
 
 [CPU smoke report / CPU 实测报告](benchmarks/cpu-smoke.md) and [raw trials / 原始数据](benchmarks/cpu-smoke.json) record three rotated trials per mode, two requests per trial and four generated tokens per request. All 18 measured requests succeeded (plus nine warmups). RSS is sampled process memory including load/warmup, not GPU VRAM. Small workloads and shared-host noise limit performance conclusions. The script starts a fresh server per trial, separates warmup, retains exact commands and errors, and exits nonzero on any failed request. Each mode uses the same prompt; the prefix mode intentionally measures a warm reusable prefix.
 
-本轮验收：116 项常规 Rust 测试、2 项 Python 测试通过；fmt、clippy 和文档链接检查通过。额外执行的真实 Qwen CPU/F32 对齐、CPU/F16 数值与生命周期测试，以及真实模型 HTTP/trace/SIGTERM 排空 smoke 均通过。远端 CI 和 GPU 成功路径尚未执行。
+本轮验收：125 项常规 Rust 测试、5 项 Python 测试通过；fmt、clippy 和文档链接检查通过。额外执行的真实 Qwen CPU/F32 对齐、CPU/F16 数值与生命周期测试，以及真实模型 HTTP/trace/SIGTERM 排空 smoke 均通过。远端 CI 和 GPU 成功路径尚未执行。

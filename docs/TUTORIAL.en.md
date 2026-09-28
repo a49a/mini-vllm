@@ -123,7 +123,7 @@ Let `T` be the total number of input tokens in this call, `H` the hidden size, `
 | K/V projections | Each: `[T, H] → [T, Nkv*d]` |
 | Q reshape for one sequence | `[q_len, Nq*d] → [Nq, q_len, d]` |
 | Historical K/V for one sequence | Each: `[Nkv, kv_len, d]` |
-| Attention scores | `[Nq, q_len, kv_len]` |
+| Attention scores | Dense: `[Nq, q_len, kv_len]`; paged workspace: `[Nq, q_len, page_len]` |
 | Attention output and O projection | `[q_len, H]` |
 | MLP | `[T, H] → [T, I] → [T, H]` |
 | LM head on last positions | `[num_seqs, H] → [num_seqs, V]` |
@@ -164,7 +164,7 @@ needed_blocks = ceil((prompt_len + max_new_tokens - pinned_shared_prefix) / bloc
 
 With block size 16 and horizon 33, the manager reserves three blocks; physical page tensors are allocated on demand. Attention reads page lists directly, normalizes across pages, and accumulates their contributions. These portable Candle operations are not a fused GPU PagedAttention kernel.
 
-Cold admission reserves the full horizon, trading some concurrency for capacity predictability during decode. `--prefix-cache-tokens` enables an LRU of shared prefixes with an additional, separate budget. Hits skip prompt computation and deduct the shared prefix from active admission. A reference-counted pin keeps that prefix charged to the retention pool until all active borrowers release it; pinned entries cannot be evicted. Total pool blocks are also rounded up, so `max_kv_tokens` is not a byte-exact GPU memory limit.
+Cold admission reserves the full horizon, trading some concurrency for capacity predictability during decode. `--prefix-cache-tokens` enables a block trie of shared prefixes with unpinned-leaf LRU eviction with an additional, separate budget. Hits skip prompt computation and deduct the shared prefix from active admission. A reference-counted pin keeps that prefix charged to the retention pool until all active borrowers release it; pinned entries cannot be evicted. Total pool blocks are also rounded up, so `max_kv_tokens` is not a byte-exact GPU memory limit.
 
 **Capacity exercise:** The pool has three blocks and each request needs two. A and B arrive together. After admitting A, the current admission budget must decrease from three to one; B waits. Checking “2 ≤ 3” separately for both requests would over-admit them.
 
@@ -332,3 +332,7 @@ Current boundaries include a single engine thread, per-sequence attention, no fu
 Close the code and answer: Why might the last generated token never enter KV? Why are KV blocks not a direct measurement of GPU memory? Why does each request need its own RNG? Why can editing a final string not repair already-sent SSE? Why must “catch an error and retry” account for cache side effects?
 
 The answers are in sections 4, 6, 8, 9, and 10 respectively. If you can explain them using the actual functions, you understand the project's most important system boundaries.
+
+## 15. Advanced experiments / 进阶实验
+
+See [Advanced runtime experiments](ADVANCED_RUNTIME.md): configure defaults and deadlines, derive the online softmax recurrence, inspect deduplicated block-trie ownership, replay JSONL traces, and vary workload length/concurrency/prefix reuse. The measured GPU limitations are listed separately from implemented test entry points.

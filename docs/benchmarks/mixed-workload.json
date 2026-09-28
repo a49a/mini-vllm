@@ -1,0 +1,197 @@
+{
+  "settings": {
+    "host": "127.0.0.1",
+    "port": 50348,
+    "seed": 42,
+    "requests": 4,
+    "concurrency": [
+      1,
+      2
+    ],
+    "hit_rates": [
+      0.0,
+      0.5,
+      1.0
+    ],
+    "long_repeat": 2,
+    "short_output": 1,
+    "long_output": 2,
+    "output": "docs/benchmarks/mixed-workload.json"
+  },
+  "percentile_method": "linear interpolation over successful requests; small samples do not establish tail latency",
+  "scenarios": [
+    {
+      "concurrency": 1,
+      "requested_reuse_fraction": 0.0,
+      "successful": 4,
+      "failures": [],
+      "wall_seconds": 4.260744208935648,
+      "tokens_per_second": 1.4082046951837142,
+      "latency_ms": {
+        "p50": 1056.6488954937086,
+        "p95": 1410.6556168932002,
+        "p99": 1442.5630569679197
+      },
+      "ttft_ms": {
+        "p50": 1008.6420620209537,
+        "p95": 1317.4419043178204,
+        "p99": 1349.7398144297767
+      },
+      "itl_ms": {
+        "p50": 94.32039601961151,
+        "p95": 95.77856517280452,
+        "p99": 95.9081802086439
+      },
+      "prefix_hit_tokens": 0,
+      "computed_prompt_tokens": 192,
+      "observed_prefix_token_fraction": 0.0,
+      "kv_storage_allocations": 2400
+    },
+    {
+      "concurrency": 1,
+      "requested_reuse_fraction": 0.5,
+      "successful": 4,
+      "failures": [],
+      "wall_seconds": 2.026384790893644,
+      "tokens_per_second": 2.960938133252557,
+      "latency_ms": {
+        "p50": 396.04200050234795,
+        "p95": 1047.0456626673695,
+        "p99": 1111.1558325856458
+      },
+      "ttft_ms": {
+        "p50": 349.7459585778415,
+        "p95": 969.5458294765558,
+        "p99": 1022.71839946392
+      },
+      "itl_ms": {
+        "p50": 92.76754152961075,
+        "p95": 94.23217852599919,
+        "p99": 94.36236848123372
+      },
+      "prefix_hit_tokens": 96,
+      "computed_prompt_tokens": 104,
+      "observed_prefix_token_fraction": 0.48,
+      "kv_storage_allocations": 1344
+    },
+    {
+      "concurrency": 1,
+      "requested_reuse_fraction": 1.0,
+      "successful": 4,
+      "failures": [],
+      "wall_seconds": 0.6741557080531493,
+      "tokens_per_second": 8.900021060901512,
+      "latency_ms": {
+        "p50": 184.11602097330615,
+        "p95": 199.03330814559013,
+        "p99": 199.38272811938077
+      },
+      "ttft_ms": {
+        "p50": 105.28945847181603,
+        "p95": 161.80838931468315,
+        "p99": 169.6809441933874
+      },
+      "itl_ms": {
+        "p50": 94.36435456154868,
+        "p95": 94.84471111209132,
+        "p99": 94.88740947213955
+      },
+      "prefix_hit_tokens": 176,
+      "computed_prompt_tokens": 8,
+      "observed_prefix_token_fraction": 0.9565217391304348,
+      "kv_storage_allocations": 192
+    },
+    {
+      "concurrency": 2,
+      "requested_reuse_fraction": 0.0,
+      "successful": 4,
+      "failures": [],
+      "wall_seconds": 2.685762000037357,
+      "tokens_per_second": 2.234002863960598,
+      "latency_ms": {
+        "p50": 1038.8029579771683,
+        "p95": 1414.902899984736,
+        "p99": 1439.6728799887933
+      },
+      "ttft_ms": {
+        "p50": 992.4717915127985,
+        "p95": 1286.7263972642832,
+        "p99": 1306.478612178471
+      },
+      "itl_ms": {
+        "p50": 113.48922952311113,
+        "p95": 132.28166110930033,
+        "p99": 133.95209947251715
+      },
+      "prefix_hit_tokens": 0,
+      "computed_prompt_tokens": 191,
+      "observed_prefix_token_fraction": 0.0,
+      "kv_storage_allocations": 2448
+    },
+    {
+      "concurrency": 2,
+      "requested_reuse_fraction": 0.5,
+      "successful": 4,
+      "failures": [],
+      "wall_seconds": 1.6980557080823928,
+      "tokens_per_second": 3.5334529788635587,
+      "latency_ms": {
+        "p50": 560.6826459406875,
+        "p95": 1299.360108061228,
+        "p99": 1368.5059879836626
+      },
+      "ttft_ms": {
+        "p50": 495.7223954843357,
+        "p95": 1220.7877830951475,
+        "p99": 1278.846523060929
+      },
+      "itl_ms": {
+        "p50": 111.11341702053323,
+        "p95": 127.96557957190089,
+        "p99": 129.4635495764669
+      },
+      "prefix_hit_tokens": 96,
+      "computed_prompt_tokens": 96,
+      "observed_prefix_token_fraction": 0.5,
+      "kv_storage_allocations": 1296
+    },
+    {
+      "concurrency": 2,
+      "requested_reuse_fraction": 1.0,
+      "successful": 4,
+      "failures": [],
+      "wall_seconds": 0.5534585000714287,
+      "tokens_per_second": 10.84092122395021,
+      "latency_ms": {
+        "p50": 219.45035451790318,
+        "p95": 323.3490544487722,
+        "p99": 337.0455444813706
+      },
+      "ttft_ms": {
+        "p50": 174.15745853213593,
+        "p95": 226.5989813429769,
+        "p99": 226.640796296997
+      },
+      "itl_ms": {
+        "p50": 102.15106245595962,
+        "p95": 112.61459336383268,
+        "p99": 113.54468500008807
+      },
+      "prefix_hit_tokens": 192,
+      "computed_prompt_tokens": 12,
+      "observed_prefix_token_fraction": 0.9411764705882353,
+      "kv_storage_allocations": 192
+    }
+  ],
+  "server": {
+    "model": "qwen2.5-0.5b-instruct",
+    "device": "cpu",
+    "dtype": "f32",
+    "max_batch_tokens": 16,
+    "max_prefill_chunk_tokens": 8,
+    "kv_block_size": 4,
+    "prefix_cache_tokens": 512,
+    "trace_jsonl_enabled": true
+  },
+  "measurement_note": "Trace was enabled to generate the teaching replay. These small-sample results validate the scenario harness, not production P95/P99 or an uninstrumented speed claim."
+}

@@ -226,11 +226,11 @@ GEMM，注意力核按序列循环**（每序列独享 KV 缓存）。LM head �
 
 ### 6.1 物理分页与连续参考路径
 
-默认使用 `paged.rs` 的物理 KV 页，各层按页持有 K/V 张量；`cache.rs` 保留连续张量路径，供 `--contiguous-kv` 与数值对照使用。页大小由 `--kv-block-size` 控制。完整页可通过 Arc 共享；独占部分页原地追加，共享部分页写入前复制。attention 直接读取页列表，跨页统一 softmax，再累加各页的 V 贡献，不拼接完整 K/V。当前使用通用 Candle 算子，未实现融合 GPU kernel。
+默认使用 `paged.rs` 的物理 KV 页，各层按页持有 K/V 张量；`cache.rs` 保留连续张量路径，供 `--contiguous-kv` 与数值对照使用。页大小由 `--kv-block-size` 控制。完整页可通过 Arc 共享；独占部分页原地追加，共享部分页写入前复制。attention 直接读取页列表，逐页执行在线 softmax（运行最大值、归一化分母与 V 加权分子），不拼接完整 scores，不拼接完整 K/V。当前使用通用 Candle 算子，未实现融合 GPU kernel。
 
 ### 6.2 容量与前缀缓存
 
-活动请求按 horizon 扣除命中且被 pin 的完整前缀后预留逻辑块，准入时逐请求扣减预算；实际页按需分配。`--prefix-cache-tokens` 是活动 KV 预算之外的独立 LRU 保留上限，默认 0。缓存仅保留完整块边界的 prompt 前缀；至少留下一个 prompt token 重新计算 logits。模型实例内共享，取消一个序列不会修改其他序列的页。
+活动请求按 horizon 扣除命中且被 pin 的完整前缀后预留逻辑块，准入时逐请求扣减预算；实际页按需分配。`--prefix-cache-tokens` 是活动 KV 预算之外的独立前缀树保留上限（按唯一块记账，淘汰未被 pin 的叶节点），默认 0。缓存仅保留完整块边界的 prompt 前缀；至少留下一个 prompt token 重新计算 logits。模型实例内共享，取消一个序列不会修改其他序列的页。
 
 回滚通过恢复长度并裁剪页表完成；历史页不可变。逻辑块管理器负责保守准入和块号复用，物理页生命周期由引用计数管理，二者不是同一个全局设备内存分配器。临时 attention scores、模型权重不包含在 token 容量预算内。
 
@@ -368,7 +368,7 @@ handler future 持有守卫（正常完成后解除，避免无谓的取消命�
 
 ## 11. 测试策略与正确性门禁
 
-共 116 个测试（`cargo test --workspace`），关键门禁按设计文档 §52：
+共 125 个测试（`cargo test --workspace`），关键门禁按设计文档 §52：
 
 | 层 | 测试 |
 |---|---|
@@ -397,7 +397,7 @@ solo 与 batched 的贪心链因此允许合法分叉（vLLM 同样如此），�
 | Continuous batching | 每迭代 retire/admit/prefill/decode | ✅ |
 | 混合 prefill+decode 批 | 单个 BatchTokens 混合批 | ✅ |
 | Chunked prefill | 合计 token 预算下分块推进 | ✅ |
-| Prefix caching | 独立预算、LRU、不可变页共享 | ✅ 可选 |
+| Prefix caching | 独立预算、按块前缀树去重、叶节点 LRU、不可变页共享 | ✅ 可选 |
 | OpenAI server | axum + SSE | ✅ 子集 |
 | Scheduler / admission | FIFO + KV 门控 + max_num_seqs | ✅ |
 | Metrics（TTFT/TPOT 等） | 原子计数 + /metrics JSON | ✅（Prometheus 后续） |

@@ -123,7 +123,7 @@ What is a KV cache?<|im_end|>
 | K/V 投影 | 各为 `[T, H] → [T, Nkv*d]` |
 | 单序列 Q 重排 | `[q_len, Nq*d] → [Nq, q_len, d]` |
 | 单序列历史 K/V | 各为 `[Nkv, kv_len, d]` |
-| attention scores | `[Nq, q_len, kv_len]` |
+| attention scores | dense: `[Nq, q_len, kv_len]`；分页工作区：`[Nq, q_len, page_len]` |
 | attention 输出与 O 投影 | `[q_len, H]` |
 | MLP | `[T, H] → [T, I] → [T, H]` |
 | 最后位置的 LM head | `[num_seqs, H] → [num_seqs, V]` |
@@ -164,7 +164,7 @@ needed_blocks = ceil((prompt_len + max_new_tokens - pinned_shared_prefix) / bloc
 
 例如 block size 为 16、horizon 为 33，需记账 3 个块；分页张量按需分配。attention 直接读取页列表，跨页统一 softmax 后累加各页贡献；它仍使用通用 Candle 算子，不是融合 GPU PagedAttention kernel。
 
-未命中前缀时，准入预留完整 horizon，牺牲部分并发度以避免后续 decode 争抢容量。`--prefix-cache-tokens` 以额外的独立预算启用 LRU 前缀共享，命中后跳过相应 prompt 计算，同时从活动请求预算中扣除共享前缀。引用计数 pin 确保借用期间前缀始终记在保留池中，不能被 LRU 淘汰。当前总块数也向上取整，所以 `max_kv_tokens` 不是字节级精确的显存硬上限。
+未命中前缀时，准入预留完整 horizon，牺牲部分并发度以避免后续 decode 争抢容量。`--prefix-cache-tokens` 以额外的独立预算启用按块索引的前缀树（LRU 淘汰未被 pin 的叶节点），命中后跳过相应 prompt 计算，同时从活动请求预算中扣除共享前缀。引用计数 pin 确保借用期间前缀始终记在保留池中，不能被 LRU 淘汰。当前总块数也向上取整，所以 `max_kv_tokens` 不是字节级精确的显存硬上限。
 
 **容量练习：** 总共 3 块，每个请求要 2 块，同时来 A、B 两个请求。A 准入后，本轮可用预算必须从 3 变成 1；B 排队。只分别检查“2 ≤ 3”会错误地准入两个请求。
 
@@ -332,3 +332,7 @@ benchmark 从终态 usage 读取实际 token 数，要求成功终态与 `[DONE]
 合上代码回答：为什么最后一个生成 token 不一定进入 KV？为什么 KV 块数不能代表实时显存？为什么不同请求需要独立 RNG？为什么截断最终字符串无法修复已经发送的 SSE？为什么“捕获错误再重试”需要检查缓存副作用？
 
 参考答案依次见第 4、6、8、9、10 节。能结合具体函数解释这些问题，就已经理解了这个项目最重要的系统边界。
+
+## 15. Advanced experiments / 进阶实验
+
+继续阅读[进阶运行实验](ADVANCED_RUNTIME.md)：统一默认参数与超时、推导在线 softmax 递推、分析前缀树唯一块所有权、回放 JSONL 调度记录，以及改变请求长度、并发和前缀复用比例。设备测试入口与实际硬件验证结果分别记录。

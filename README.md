@@ -137,7 +137,7 @@ Key correctness gates (all in `cargo test --workspace`):
   scores across pages, and accumulates value contributions. This portable
   implementation is not a fused GPU PagedAttention kernel.
 - `--contiguous-kv` selects the contiguous correctness reference.
-- `--prefix-cache-tokens 1024` enables a bounded LRU of immutable prefix pages.
+- `--prefix-cache-tokens 1024` enables a bounded block trie of shared prefix pages.
   It is an **additional memory budget** beyond `--max-kv-tokens`; active requests
   reserve only the remaining suffix on hits. Active borrowers pin retained entries.
   Exclusive tail pages append in place; shared tails use copy-on-write.
@@ -153,9 +153,16 @@ Key correctness gates (all in `cargo test --workspace`):
 - Unknown model names return 404; overload returns 503 (typed errors after SSE headers).
   Unsupported model semantics and CPU/BF16 are rejected explicitly.
 
+- `--default-max-new-tokens` supplies omitted HTTP limits from engine configuration.
+- `--queue-timeout-ms` and `--request-timeout-ms` expire requests at scheduling boundaries (0 disables).
+- `--trace-jsonl session.jsonl` records a replayable trace; `scripts/trace_replay.py` creates an offline HTML timeline.
+- The block prefix trie deduplicates retained blocks; paged attention uses online softmax instead of concatenating scores.
+
+See [advanced runtime experiments](docs/ADVANCED_RUNTIME.md) for teaching examples, load matrices and device validation.
+
 ## Performance measurement
 
-See the [three-mode CPU report](docs/benchmarks/cpu-smoke.md) and [reproduction/device commands](docs/IMPLEMENTATION.md).
+See the [three-mode CPU report](docs/benchmarks/online-kv-comparison.md) and [reproduction/device commands](docs/IMPLEMENTATION.md).
 Run `python3 scripts/compare_kv.py --model models/qwen2.5-0.5b-instruct` for fresh-server trials, RSS and KV allocation counts.
 
 Use `scripts/benchmark.py --requests 8 --concurrency 1 4 --max-tokens 32`.
