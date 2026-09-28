@@ -160,6 +160,8 @@ Key correctness gates (all in `cargo test --workspace`):
 - `--trace-jsonl session.jsonl` records a replayable trace; `scripts/trace_replay.py` creates an offline HTML timeline.
 - The block prefix trie deduplicates retained blocks; paged attention uses online softmax instead of concatenating scores.
 
+See [HTTP admission and lifecycle testing](docs/http-lifecycle-validation.md) for bounded preprocessing and reproducible generated tests; [GPU validation](docs/gpu-validation.md) describes hardware requirements and the manual workflow.
+
 See [advanced runtime experiments](docs/ADVANCED_RUNTIME.md) for teaching examples, load matrices and device validation.
 
 ## Performance measurement

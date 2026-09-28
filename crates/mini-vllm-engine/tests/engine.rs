@@ -737,6 +737,21 @@ async fn backend_dtype_lifecycle() {
     let second = drain(handle.generate(req("reuse", vec![4; 9], 4)).unwrap()).await;
     assert_eq!(first.0, second.0);
     assert!(handle.metrics().snapshot().prefix_cache_hit_tokens >= 8);
+    // Force eviction with more disjoint prefixes than the retained pool fits.
+    for token in 5..10 {
+        drain(
+            handle
+                .generate(req(&format!("evict-{token}"), vec![token; 9], 4))
+                .unwrap(),
+        )
+        .await;
+    }
+    let before = handle.metrics().snapshot().prefix_cache_hit_tokens;
+    let cold = drain(handle.generate(req("evicted-cold", vec![4; 9], 4)).unwrap()).await;
+    assert_eq!(handle.metrics().snapshot().prefix_cache_hit_tokens, before);
+    let warm = drain(handle.generate(req("evicted-warm", vec![4; 9], 4)).unwrap()).await;
+    assert_eq!(cold.0, warm.0);
+    assert!(handle.metrics().snapshot().prefix_cache_hit_tokens >= before + 8);
     let cancelled = handle.generate(req("cancel", vec![5; 32], 16)).unwrap();
     handle.cancel("cancel").unwrap();
     assert_eq!(drain(cancelled).await.1, FinishReason::Cancelled);
@@ -764,5 +779,12 @@ async fn backend_dtype_lifecycle() {
         Duration::from_secs(5),
     );
     handle.join(Duration::from_secs(5)).unwrap();
-    assert_eq!(handle.metrics().snapshot().kv_blocks_used, 0);
+    let final_metrics = handle.metrics().snapshot();
+    assert_eq!(final_metrics.kv_blocks_used, 0);
+    assert_eq!(final_metrics.kv_active_sequences, 0);
+    assert_eq!(final_metrics.cached_prefix_tokens, 0);
+    assert_eq!(
+        final_metrics.requests_running + final_metrics.requests_waiting,
+        0
+    );
 }

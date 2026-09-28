@@ -1,0 +1,27 @@
+name: GPU backend validation
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Registered self-hosted GPU runner label
+        type: choice
+        options: [metal, cuda]
+        required: true
+permissions:
+  contents: read
+jobs:
+  validate:
+    # Dispatch only onto a trusted, configured GPU host; never run PR code on it.
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, '${{ inputs.backend }}']
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 scripts/validate_backends.py --devices '${{ inputs.backend }}' --dtypes f32 f16 --output artifacts/backend-validation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-${{ inputs.backend }}-${{ github.run_id }}
+          path: artifacts/backend-validation.json
+          retention-days: 30
