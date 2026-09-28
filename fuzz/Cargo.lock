@@ -969,6 +969,7 @@ name = "mini-vllm-tokenizer"
 version = "0.1.0"
 dependencies = [
  "mini-vllm-core",
+ "serde_json",
  "thiserror 2.0.21",
  "tokenizers",
 ]

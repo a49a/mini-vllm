@@ -11,7 +11,7 @@ use mini_vllm_core::{
 };
 use mini_vllm_model::loader;
 use mini_vllm_model::{resolve_device, resolve_dtype, CausalLm, ModelConfig};
-use mini_vllm_tokenizer::{QwenChatTemplate, TokenizerWrapper};
+use mini_vllm_tokenizer::{ModelChatTemplate, TokenizerWrapper};
 
 #[derive(Parser)]
 #[command(
@@ -303,6 +303,7 @@ fn cmd_serve(args: Command) -> Result<()> {
 
     let (dev, dt) = resolve(&device, &dtype)?;
     let tokenizer = Arc::new(load_tokenizer_or_die(&model)?);
+    let template = Arc::new(ModelChatTemplate::from_model_dir(&model)?);
     tracing::info!(path = %model.display(), "loading model");
     let loaded = loader::load_model(&model, dt, dev)?;
     let model_max = loaded.config().max_position_embeddings;
@@ -341,7 +342,7 @@ fn cmd_serve(args: Command) -> Result<()> {
     let state: mini_vllm_server::SharedState = Arc::new(mini_vllm_server::AppState {
         engine: Arc::new(handle.clone()),
         tokenizer,
-        template: Arc::new(QwenChatTemplate),
+        template,
         model_id: model_id.clone(),
         max_model_len,
         vocab_size,

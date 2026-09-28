@@ -5,7 +5,7 @@
 pub mod chat_template;
 pub mod tokenizer;
 
-pub use chat_template::{ChatMessage, ChatTemplate, QwenChatTemplate};
+pub use chat_template::{ChatMessage, ChatTemplate, ModelChatTemplate, QwenChatTemplate};
 #[cfg(feature = "test-util")]
 pub use tokenizer::testutil;
 pub use tokenizer::{IncrementalDetokenizer, TokenizerError, TokenizerWrapper};

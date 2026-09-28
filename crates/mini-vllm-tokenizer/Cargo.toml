@@ -8,6 +8,7 @@ description = "Tokenizer and chat template for mini-vllm-rs"
 
 [dependencies]
 tokenizers = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 mini-vllm-core = { workspace = true }
 
