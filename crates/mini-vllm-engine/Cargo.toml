@@ -1,0 +1,24 @@
+[package]
+name = "mini-vllm-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Inference engine: request lifecycle, scheduler, continuous batching, metrics"
+
+[dependencies]
+mini-vllm-core = { workspace = true }
+mini-vllm-model = { workspace = true }
+mini-vllm-kv = { workspace = true }
+mini-vllm-sampling = { workspace = true }
+mini-vllm-tokenizer = { workspace = true }
+candle-core = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+mini-vllm-tokenizer = { workspace = true, features = ["test-util"] }
+mini-vllm-model = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
