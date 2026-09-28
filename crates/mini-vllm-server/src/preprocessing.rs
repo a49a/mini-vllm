@@ -1,4 +1,7 @@
 //! Bounded admission before reading JSON; CPU work never runs on Tokio workers.
+// Axum rejection responses are returned by value at this HTTP boundary.
+// Newer Clippy versions also check the Result output of async functions.
+#![allow(clippy::result_large_err)]
 use axum::{
     extract::{FromRequest, Request},
     response::Response,
@@ -52,8 +55,6 @@ impl Preprocessor {
             timeout: config.timeout,
         })
     }
-    // Axum rejection responses are intentionally returned by value.
-    #[allow(clippy::result_large_err)]
     fn admit(&self) -> Result<Ticket, Response> {
         let permit = self
             .admission
