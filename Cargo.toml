@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mini-vllm-core",
+    "crates/mini-vllm-tokenizer",
+    "crates/mini-vllm-sampling",
+    "crates/mini-vllm-kv",
+    "crates/mini-vllm-model",
+    "crates/mini-vllm-engine",
+    "crates/mini-vllm-server",
+    "crates/mini-vllm-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.81"
+
+[workspace.dependencies]
+mini-vllm-core = { path = "crates/mini-vllm-core" }
+mini-vllm-tokenizer = { path = "crates/mini-vllm-tokenizer" }
+mini-vllm-sampling = { path = "crates/mini-vllm-sampling" }
+mini-vllm-kv = { path = "crates/mini-vllm-kv" }
+mini-vllm-model = { path = "crates/mini-vllm-model" }
+mini-vllm-engine = { path = "crates/mini-vllm-engine" }
+mini-vllm-server = { path = "crates/mini-vllm-server" }
+
+candle-core = "0.9"
+tokenizers = "0.21"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "net",
+    "signal",
+    "io-util",
+] }
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.9"
+tokio-stream = "0.1"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"

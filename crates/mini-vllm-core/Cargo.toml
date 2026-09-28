@@ -1,0 +1,10 @@
+[package]
+name = "mini-vllm-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Core domain types for mini-vllm-rs"
+
+[dependencies]
+thiserror = { workspace = true }
