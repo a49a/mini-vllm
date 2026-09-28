@@ -8,8 +8,7 @@ use std::{
         mpsc::{self, Receiver, SyncSender, TrySendError},
         Arc,
     },
-    thread::JoinHandle,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const TRACE_LIMIT: usize = 100_000;
@@ -17,7 +16,9 @@ const QUEUE_CAPACITY: usize = 1024;
 
 pub struct TraceWriter {
     sender: Option<SyncSender<serde_json::Value>>,
-    worker: Option<JoinHandle<()>>,
+    finished: Option<Receiver<()>>,
+    errors: Arc<AtomicU64>,
+    timeouts: Arc<AtomicU64>,
     dropped: Arc<AtomicU64>,
     started: Instant,
     count: usize,
@@ -25,33 +26,96 @@ pub struct TraceWriter {
 
 impl TraceWriter {
     pub fn new(path: Option<&Path>) -> std::io::Result<Self> {
-        Self::new_with_counter(path, Arc::new(AtomicU64::new(0)))
+        Self::new_with_counters(
+            path,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )
     }
 
-    pub fn new_with_counter(path: Option<&Path>, dropped: Arc<AtomicU64>) -> std::io::Result<Self> {
-        let (sender, worker) = if let Some(path) = path {
+    pub fn new_with_counters(
+        path: Option<&Path>,
+        dropped: Arc<AtomicU64>,
+        errors: Arc<AtomicU64>,
+        timeouts: Arc<AtomicU64>,
+    ) -> std::io::Result<Self> {
+        if let Some(path) = path {
             let file = OpenOptions::new().write(true).create_new(true).open(path)?;
-            let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
-            let dropped_for_worker = dropped.clone();
-            let worker = std::thread::Builder::new()
-                .name("mini-vllm-trace".into())
-                .spawn(move || {
-                    let mut file = BufWriter::new(file);
-                    if let Err(error) = drain_trace(&mut file, receiver, &dropped_for_worker) {
-                        tracing::warn!(%error, "teaching trace writer stopped after write failure");
-                    }
-                })?;
-            (Some(sender), Some(worker))
+            Self::with_sink(file, dropped, errors, timeouts)
         } else {
-            (None, None)
-        };
+            Ok(Self {
+                sender: None,
+                finished: None,
+                dropped,
+                errors,
+                timeouts,
+                started: Instant::now(),
+                count: 0,
+            })
+        }
+    }
+
+    fn with_sink(
+        sink: impl Write + Send + 'static,
+        dropped: Arc<AtomicU64>,
+        errors: Arc<AtomicU64>,
+        timeouts: Arc<AtomicU64>,
+    ) -> std::io::Result<Self> {
+        let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
+        let (done, finished) = mpsc::channel();
+        let worker_dropped = dropped.clone();
+        let worker_errors = errors.clone();
+        std::thread::Builder::new()
+            .name("mini-vllm-trace".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut file = BufWriter::new(sink);
+                    let result = drain_trace(&mut file, receiver, &worker_dropped);
+                    // Do not retry a failed flush in BufWriter::drop.
+                    let (sink, _) = file.into_parts();
+                    drop(sink);
+                    result
+                }));
+                if !matches!(result, Ok(Ok(()))) {
+                    worker_errors.fetch_add(1, Ordering::Relaxed);
+                    tracing::warn!(
+                        "teaching trace writer failed or panicked; trace may be incomplete"
+                    );
+                }
+                let _ = done.send(());
+            })?;
         Ok(Self {
-            sender,
-            worker,
+            sender: Some(sender),
+            finished: Some(finished),
             dropped,
+            errors,
+            timeouts,
             started: Instant::now(),
             count: 0,
         })
+    }
+
+    /// Close the queue and wait at most `timeout`. A blocked OS write cannot be
+    /// cancelled safely: on timeout its thread is detached and the trace may be
+    /// incomplete. Repeated calls do not wait or count the timeout again.
+    pub fn shutdown(&mut self, timeout: Duration) -> bool {
+        self.sender.take();
+        let Some(finished) = self.finished.take() else {
+            return true;
+        };
+        match finished.recv_timeout(timeout) {
+            Ok(()) => true,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.timeouts.fetch_add(1, Ordering::Relaxed);
+                tracing::warn!("teaching trace shutdown timed out; writer detached");
+                false
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                self.errors.fetch_add(1, Ordering::Relaxed);
+                true
+            }
+        }
     }
 
     pub fn emit(&mut self, event: impl FnOnce() -> serde_json::Value) {
@@ -81,12 +145,7 @@ impl TraceWriter {
 
 impl Drop for TraceWriter {
     fn drop(&mut self) {
-        self.sender.take();
-        if let Some(worker) = self.worker.take() {
-            if worker.join().is_err() {
-                tracing::warn!("teaching trace writer panicked");
-            }
-        }
+        self.shutdown(Duration::from_millis(250));
     }
 }
 
@@ -152,7 +211,9 @@ mod tests {
         let (sender, receiver) = mpsc::sync_channel(1);
         let mut trace = TraceWriter {
             sender: Some(sender),
-            worker: None,
+            finished: None,
+            errors: Default::default(),
+            timeouts: Default::default(),
             dropped: Arc::new(AtomicU64::new(0)),
             started: Instant::now(),
             count: 0,
@@ -199,5 +260,66 @@ mod tests {
         assert!(sender
             .try_send(serde_json::json!({"event":"second"}))
             .is_err());
+    }
+    #[test]
+    fn blocked_flush_does_not_block_shutdown() {
+        struct Slow {
+            entered: mpsc::Sender<()>,
+            release: Receiver<()>,
+        }
+        impl Write for Slow {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.entered.send(()).unwrap();
+                self.release.recv().unwrap();
+                Ok(())
+            }
+        }
+        let (entered, waiting) = mpsc::channel();
+        let (release, blocked) = mpsc::channel();
+        let timeouts = Arc::new(AtomicU64::new(0));
+        let mut trace = TraceWriter::with_sink(
+            Slow {
+                entered,
+                release: blocked,
+            },
+            Default::default(),
+            Default::default(),
+            timeouts.clone(),
+        )
+        .unwrap();
+        trace.emit(|| serde_json::json!({"event":"test"}));
+        trace.sender.take();
+        waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(!trace.shutdown(Duration::ZERO));
+        drop(trace); // Must return while the writer is still blocked.
+        assert_eq!(timeouts.load(Ordering::Relaxed), 1);
+        release.send(()).unwrap();
+    }
+
+    #[test]
+    fn background_failure_is_observable_without_another_emit() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("disk unavailable"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let errors = Arc::new(AtomicU64::new(0));
+        let mut trace = TraceWriter::with_sink(
+            Broken,
+            Default::default(),
+            errors.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        trace.emit(|| serde_json::json!({"event":"test"}));
+        assert!(trace.shutdown(Duration::from_secs(2)));
+        assert_eq!(errors.load(Ordering::Relaxed), 1);
     }
 }

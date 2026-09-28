@@ -224,9 +224,11 @@ pub fn spawn_engine(
 ) -> mini_vllm_core::Result<EngineHandle> {
     config.validate()?;
     let metrics = Arc::new(Metrics::new());
-    let trace = crate::trace::TraceWriter::new_with_counter(
+    let trace = crate::trace::TraceWriter::new_with_counters(
         config.trace_jsonl.as_deref(),
         metrics.trace_events_dropped.clone(),
+        metrics.trace_writer_errors.clone(),
+        metrics.trace_shutdown_timeouts.clone(),
     )
     .map_err(|e| mini_vllm_core::Error::InvalidRequest(format!("opening trace: {e}")))?;
     model
