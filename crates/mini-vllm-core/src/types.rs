@@ -70,7 +70,7 @@ impl GenerationRequest {
             .prompt_token_ids
             .len()
             .checked_add(self.max_new_tokens)
-            .map_or(true, |n| n > max_model_len)
+            .is_none_or(|n| n > max_model_len)
         {
             return Err(crate::Error::InvalidRequest(format!(
                 "prompt_len({}) + max_new_tokens({}) exceeds max_model_len({})",

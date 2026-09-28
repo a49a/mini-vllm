@@ -94,7 +94,7 @@ impl PagedLayer {
             let mut indices = Vec::with_capacity(heads * count * dim);
             for _ in 0..heads {
                 for pos in used..used + count {
-                    indices.extend(std::iter::repeat(pos as u32).take(dim));
+                    indices.extend(std::iter::repeat_n(pos as u32, dim));
                 }
             }
             let indices = Tensor::from_vec(indices, (heads, count, dim), k.device())?;
@@ -130,7 +130,7 @@ impl PagedLayer {
     }
     pub fn share_prefix_from(&mut self, source: &Self, len: usize) -> Result<()> {
         if self.block_size != source.block_size
-            || len % self.block_size != 0
+            || !len.is_multiple_of(self.block_size)
             || len > self.len
             || len > source.len
         {
@@ -140,6 +140,47 @@ impl PagedLayer {
             self.pages[i] = Arc::clone(&source.pages[i]);
         }
         Ok(())
+    }
+    /// Retain only one complete page, so a trie node does not duplicate its ancestors' tables.
+    pub fn fork_block(&self, start: usize) -> Result<Self> {
+        if !start.is_multiple_of(self.block_size)
+            || self.len.saturating_sub(start) < self.block_size
+        {
+            candle_core::bail!("invalid paged KV block");
+        }
+        Ok(Self {
+            pages: vec![Arc::clone(&self.pages[start / self.block_size])],
+            block_size: self.block_size,
+            len: self.block_size,
+            capacity: self.block_size,
+            allocations: self.allocations.clone(),
+        })
+    }
+    pub fn share_block_from(&mut self, source: &Self, start: usize) -> Result<()> {
+        if self.block_size != source.block_size
+            || !start.is_multiple_of(self.block_size)
+            || self.len.saturating_sub(start) < self.block_size
+            || source.len != source.block_size
+        {
+            candle_core::bail!("invalid canonical KV block");
+        }
+        self.pages[start / self.block_size] = Arc::clone(&source.pages[0]);
+        Ok(())
+    }
+    pub fn append_shared_block(&mut self, source: &Self) -> Result<()> {
+        if self.block_size != source.block_size
+            || source.len != source.block_size
+            || !self.len.is_multiple_of(self.block_size)
+            || self.block_size > self.capacity.saturating_sub(self.len)
+        {
+            candle_core::bail!("invalid shared KV block append");
+        }
+        self.pages.push(Arc::clone(&source.pages[0]));
+        self.len += self.block_size;
+        Ok(())
+    }
+    pub fn page_count(&self) -> usize {
+        self.pages.len()
     }
     pub fn with_capacity(mut self, capacity: usize) -> Self {
         self.capacity = capacity;

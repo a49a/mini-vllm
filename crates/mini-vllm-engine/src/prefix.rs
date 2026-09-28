@@ -1,5 +1,5 @@
 //! Block-keyed prefix trie. Each node owns one unique block across all layers;
-//! snapshots share canonical ancestor pages. Only unpinned leaves can be evicted.
+//! nodes retain only their own pages. Only unpinned leaves can be evicted.
 use mini_vllm_kv::KvCache;
 use std::{collections::HashMap, sync::Arc};
 
@@ -64,11 +64,21 @@ impl PrefixCache {
         self.clock += 1;
         let node = self.nodes.get_mut(&id).unwrap();
         node.used = self.clock;
-        Ok(Some((
-            node.cache
-                .fork_prefix(node.depth * self.block_size, capacity)?,
-            node.pin.clone(),
-        )))
+        let pin = node.pin.clone();
+        let mut path = vec![id];
+        let mut parent = node.parent;
+        while let Some(ancestor) = parent {
+            path.push(ancestor);
+            parent = self.nodes[&ancestor].parent;
+        }
+        path.reverse();
+        let mut cache = self.nodes[&path[0]]
+            .cache
+            .fork_prefix(self.block_size, capacity)?;
+        for ancestor in path.into_iter().skip(1) {
+            cache.append_shared_block(&self.nodes[&ancestor].cache)?;
+        }
+        Ok(Some((cache, pin)))
     }
     fn evict_leaf(&mut self, protected: Option<usize>) -> bool {
         let victim = self
@@ -103,7 +113,7 @@ impl PrefixCache {
                 // Concurrent cold requests may have computed identical history.
                 // Canonicalize before adding any descendants, so accounting
                 // reflects unique tensors rather than overlapping snapshots.
-                cache.share_prefix_from(&node.cache, (i + 1) * self.block_size)?;
+                cache.share_block_from(&node.cache, i * self.block_size)?;
                 parent = Some(id);
                 continue;
             }
@@ -112,8 +122,7 @@ impl PrefixCache {
                     return Ok(());
                 }
             }
-            let len = (i + 1) * self.block_size;
-            let snapshot = cache.fork_prefix(len, len)?;
+            let snapshot = cache.fork_block(i * self.block_size)?;
             let id = self.next;
             self.next += 1;
             if let Some(parent) = parent {
@@ -159,6 +168,13 @@ mod tests {
         trie.insert(&[1, 2, 3, 4], &mut a).unwrap();
         trie.insert(&[1, 2, 3, 4, 5, 6], &mut a).unwrap();
         assert_eq!(trie.tokens(), 6);
+        assert_eq!(
+            trie.nodes
+                .values()
+                .map(|n| n.cache.page_table_entries())
+                .sum::<usize>(),
+            3
+        );
         assert_eq!(trie.matched_tokens(&[1, 2, 3, 4, 5, 6, 7]), 6);
         assert_eq!(
             trie.matched_tokens(&[1, 2, 3, 4]),
@@ -182,5 +198,35 @@ mod tests {
         assert_eq!(trie.tokens(), 6);
         trie.insert(&[1, 2, 9, 9], &mut b).unwrap();
         assert_eq!(trie.tokens(), 6, "duplicate insert must not charge again");
+    }
+
+    #[test]
+    fn borrowed_path_reassembles_pages_in_order() {
+        let mut source = KvCache::new_paged(1, 8, 2).unwrap();
+        let values = candle_core::Tensor::from_vec(
+            vec![1f32, 2., 3., 4., 5., 6.],
+            (1, 6, 1),
+            &candle_core::Device::Cpu,
+        )
+        .unwrap();
+        source.write_layer_pages(0, &values, &values).unwrap();
+        let mut trie = PrefixCache::new(2, 6);
+        trie.insert(&[1, 2, 3, 4, 5, 6], &mut source).unwrap();
+        assert_eq!(
+            trie.nodes
+                .values()
+                .map(|n| n.cache.page_table_entries())
+                .sum::<usize>(),
+            3
+        );
+        let (mut borrowed, _pin) = trie.borrow(&[1, 2, 3, 4, 5, 6, 7], 8).unwrap().unwrap();
+        let next = candle_core::Tensor::from_vec(vec![7f32], (1, 1, 1), &candle_core::Device::Cpu)
+            .unwrap();
+        let pages = borrowed.write_layer_pages(0, &next, &next).unwrap();
+        let flattened: Vec<f32> = pages
+            .into_iter()
+            .flat_map(|(k, _)| k.flatten_all().unwrap().to_vec1::<f32>().unwrap())
+            .collect();
+        assert_eq!(flattened, vec![1., 2., 3., 4., 5., 6., 7.]);
     }
 }

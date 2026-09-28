@@ -156,6 +156,52 @@ impl KvCache {
             capacity,
         })
     }
+    pub fn fork_block(&self, start: usize) -> Result<Self> {
+        let Some(layers) = &self.paged else {
+            candle_core::bail!("block sharing requires paged storage");
+        };
+        let blocks = layers
+            .iter()
+            .map(|l| l.fork_block(start))
+            .collect::<Result<Vec<_>>>()?;
+        let block_size = blocks[0].len();
+        Ok(Self {
+            layers: vec![],
+            paged: Some(blocks),
+            seq_len: block_size,
+            capacity: block_size,
+        })
+    }
+    pub fn share_block_from(&mut self, source: &Self, start: usize) -> Result<()> {
+        let (Some(dst), Some(src)) = (&mut self.paged, &source.paged) else {
+            candle_core::bail!("block sharing requires paged storage");
+        };
+        if dst.len() != src.len() {
+            candle_core::bail!("KV layer mismatch");
+        }
+        for (dst, src) in dst.iter_mut().zip(src) {
+            dst.share_block_from(src, start)?;
+        }
+        Ok(())
+    }
+    pub fn append_shared_block(&mut self, source: &Self) -> Result<()> {
+        let (Some(dst), Some(src)) = (&mut self.paged, &source.paged) else {
+            candle_core::bail!("block sharing requires paged storage");
+        };
+        if dst.len() != src.len() {
+            candle_core::bail!("KV layer mismatch");
+        }
+        for (dst, src) in dst.iter_mut().zip(src) {
+            dst.append_shared_block(src)?;
+        }
+        self.seq_len = dst[0].len();
+        Ok(())
+    }
+    pub fn page_table_entries(&self) -> usize {
+        self.paged
+            .as_ref()
+            .map_or(0, |layers| layers.iter().map(|l| l.page_count()).sum())
+    }
 
     /// Count persistent K/V storage tensor allocations, excluding temporary
     /// attention tensors and index buffers. Prefix forks share this counter.

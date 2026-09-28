@@ -29,7 +29,7 @@ A synchronous kernel cannot be interrupted. If a forward call crosses the deadli
 
 Keys are `(parent node, exact token block)`. Hash lookup still compares the complete block, so hash collisions cannot cause incorrect reuse. Lookup walks prompt blocks until the first miss, always leaving at least one token for logits. This avoids scanning every cached prefix.
 
-每个节点对应一个新 token 块，容量只记一次；例如 `[A,B]` 与 `[A,B,C]` 共用 A、B，不再按 2+3 个块收费。插入重复历史时，将请求中的相同历史替换为规范化的共享页，再创建子节点快照。物理张量共享，但页表快照仍有元数据开销；它不等于全局物理 arena。
+每个节点对应一个新 token 块，容量只记一次；例如 `[A,B]` 与 `[A,B,C]` 共用 A、B，不再按 2+3 个块收费。插入重复历史时，将请求中的相同历史替换为规范化的共享页。节点只保留自己的单块页引用，借用时沿祖先链重建活动请求的页表；保留页表的引用数量与唯一块数成正比，而不再随链深度平方增长。它仍不等于全局物理 arena。
 
 Only unpinned leaves are evicted. An active borrower pins its terminal node; ancestors remain retained because they have descendants. If every eligible leaf is pinned, insertion stops rather than exceeding the budget. The active reservation subtracts only the prefix borrowed at admission; newly cached suffix pages remain conservatively charged to that request until retirement.
 
@@ -70,9 +70,15 @@ python3 scripts/trace_replay.py artifacts/session.jsonl --output artifacts/sessi
 
 The JSONL schema is versioned (`schema_version=1`) and includes elapsed microseconds, request IDs, admission/shared-prefix counts, scheduled batch step numbers, phase, positions/page counts, completed chunks and retirement reasons. It contains no prompt text or generated text. Caller-supplied request IDs remain visible. Scheduling page counts describe the planned step; a failed/expired forward may not commit that step.
 
-离线 HTML 可拖动时间滑块或自动播放，逐请求观察状态、同批 step、位置和共享前缀。页面无外部依赖，用文本节点显示 ID；JSON 中的 `<` 被转义，避免请求 ID 注入脚本。追踪最多保留 100,000 条事件，再写一条 `truncated` 标记。文件写入失败会告警并关闭追踪；推理继续。关闭追踪时不会构造 JSON payload。
+离线 HTML 可拖动时间滑块或自动播放，逐请求观察状态、同批 step、位置和共享前缀。页面无外部依赖，用文本节点显示 ID；JSON 中的 `<` 被转义，避免请求 ID 注入脚本。追踪最多尝试保留 100,000 条事件，然后尝试加入一条 `truncated` 标记；队列满时标记也可能被丢弃。引擎通过容量为 1,024 的有界队列交给独立线程写盘；队列满时直接丢弃事件，`/metrics` 的 `trace_events_dropped` 记录累计数量，关闭时在 JSONL 末尾写入 `trace_dropped` 计数。文件写入失败会告警并关闭追踪；推理继续。关闭追踪时不会构造 JSON payload。
 
-Tracing flushes synchronously and adds I/O overhead: disable it for performance baselines. The generated [sample replay](benchmarks/request-trace.html) and [source JSONL](benchmarks/request-trace.jsonl) come from real HTTP requests. File generation, schema/content and injection checks passed. Browser visual inspection was blocked by the browser tool's local-file URL policy and is not claimed as completed.
+Tracing queues events without blocking on disk I/O, but JSON construction and queue operations still add overhead: disable it for performance baselines. The writer flushes when the engine exits, so read the final JSONL after shutdown. The generated [sample replay](benchmarks/request-trace.html) and [source JSONL](benchmarks/request-trace.jsonl) come from real HTTP requests. File generation, schema/content and injection checks passed. Browser visual inspection was blocked by the browser tool's local-file URL policy and is not claimed as completed.
+
+## Weight validation and minimum Rust / 权重校验与最低 Rust 版本
+
+Before allocating device tensors, the loader bounds the index and Safetensors header sizes, checks shard filenames and manifest coverage, rejects duplicate names and invalid shapes/offsets, and validates the required Qwen2 tensor dimensions against `config.json`. `mini-vllm inspect` uses the same header checks without loading weight bytes.
+
+加载器在分配设备张量前检查索引与头部大小、分片文件名和映射完整性，并拒绝重复名称、越界偏移与维度错误。工作区声明的最低版本是 Rust 1.87；CI 会用该版本对锁定依赖执行 `cargo check --locked --workspace --all-targets`。Rust 1.81 无法解析当前依赖清单，1.85 和 1.86 则无法编译锁定的 `yoke-derive`。
 
 ## Load and device matrices / 负载与设备矩阵
 
@@ -95,4 +101,4 @@ The load matrix alternates short/long prompts and output limits, varies concurre
 
 ## Validation / 验收记录
 
-125 regular Rust tests and 5 Python tests pass; fmt, clippy and documentation checks pass. Additional real Qwen CPU/F32 alignment, CPU/F32 and CPU/F16 backend numerical/lifecycle/stress runs pass. Real HTTP smoke confirms configured defaults, deadline 504 with KV reclamation, JSONL generation and clean shutdown. Browser visual QA and successful GPU execution remain unverified for the environmental reasons above.
+131 regular Rust tests and 5 Python tests pass; fmt, clippy and documentation checks pass. Additional real Qwen CPU/F32 alignment, CPU/F32 and CPU/F16 backend numerical/lifecycle/stress runs pass. Real HTTP smoke confirms configured defaults, deadline 504 with KV reclamation, JSONL generation and clean shutdown. Browser visual QA and successful GPU execution remain unverified for the environmental reasons above.

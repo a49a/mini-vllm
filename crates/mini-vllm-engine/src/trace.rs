@@ -1,58 +1,113 @@
-//! Opt-in bounded teaching trace. Synchronous file I/O adds measurement overhead.
+//! Opt-in teaching trace. A bounded channel keeps disk I/O off the engine thread.
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{BufWriter, Write},
     path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, SyncSender, TrySendError},
+        Arc,
+    },
+    thread::JoinHandle,
     time::Instant,
 };
 
+const TRACE_LIMIT: usize = 100_000;
+const QUEUE_CAPACITY: usize = 1024;
+
 pub struct TraceWriter {
-    file: Option<BufWriter<File>>,
+    sender: Option<SyncSender<serde_json::Value>>,
+    worker: Option<JoinHandle<()>>,
+    dropped: Arc<AtomicU64>,
     started: Instant,
     count: usize,
 }
+
 impl TraceWriter {
     pub fn new(path: Option<&Path>) -> std::io::Result<Self> {
-        let file = path
-            .map(|p| {
-                OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(p)
-                    .map(BufWriter::new)
-            })
-            .transpose()?;
+        Self::new_with_counter(path, Arc::new(AtomicU64::new(0)))
+    }
+
+    pub fn new_with_counter(path: Option<&Path>, dropped: Arc<AtomicU64>) -> std::io::Result<Self> {
+        let (sender, worker) = if let Some(path) = path {
+            let file = OpenOptions::new().write(true).create_new(true).open(path)?;
+            let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
+            let dropped_for_worker = dropped.clone();
+            let worker = std::thread::Builder::new()
+                .name("mini-vllm-trace".into())
+                .spawn(move || {
+                    let mut file = BufWriter::new(file);
+                    for event in receiver {
+                        if let Err(error) = write_event(&mut file, &event) {
+                            tracing::warn!(%error, "teaching trace writer stopped after write failure");
+                            return;
+                        }
+                    }
+                    let count = dropped_for_worker.load(Ordering::Relaxed);
+                    if count > 0 {
+                        if let Err(error) = write_event(&mut file, &serde_json::json!({"event":"trace_dropped","count":count,"schema_version":1})) {
+                            tracing::warn!(%error, "could not write dropped trace count");
+                        }
+                    }
+                    if let Err(error) = file.flush() {
+                        tracing::warn!(%error, "could not flush teaching trace");
+                    }
+                })?;
+            (Some(sender), Some(worker))
+        } else {
+            (None, None)
+        };
         Ok(Self {
-            file,
+            sender,
+            worker,
+            dropped,
             started: Instant::now(),
             count: 0,
         })
     }
+
     pub fn emit(&mut self, event: impl FnOnce() -> serde_json::Value) {
-        if self.file.is_none() {
+        let Some(sender) = &self.sender else {
+            return;
+        };
+        if self.count > TRACE_LIMIT {
             return;
         }
-        if self.count > 100_000 {
-            return;
-        }
-        let mut event = if self.count == 100_000 {
-            serde_json::json!({"event":"truncated","limit":100000})
+        let mut event = if self.count == TRACE_LIMIT {
+            serde_json::json!({"event":"truncated","limit":TRACE_LIMIT})
         } else {
             event()
         };
         event["schema_version"] = 1.into();
         event["elapsed_us"] = (self.started.elapsed().as_micros() as u64).into();
         self.count += 1;
-        let file = self.file.as_mut().unwrap();
-        let result = serde_json::to_writer(&mut *file, &event)
-            .map_err(std::io::Error::other)
-            .and_then(|_| file.write_all(b"\n"))
-            .and_then(|_| file.flush());
-        if let Err(error) = result {
-            tracing::warn!(%error,"teaching trace disabled after write failure");
-            self.file = None;
+        if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) = sender.try_send(event) {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
         }
     }
+
+    pub fn dropped_count(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for TraceWriter {
+    fn drop(&mut self) {
+        self.sender.take();
+        if let Some(worker) = self.worker.take() {
+            if worker.join().is_err() {
+                tracing::warn!("teaching trace writer panicked");
+            }
+        }
+    }
+}
+
+fn write_event(
+    file: &mut BufWriter<std::fs::File>,
+    event: &serde_json::Value,
+) -> std::io::Result<()> {
+    serde_json::to_writer(&mut *file, event).map_err(std::io::Error::other)?;
+    file.write_all(b"\n")
 }
 
 #[cfg(test)]
@@ -73,7 +128,7 @@ mod tests {
         ));
         let mut trace = TraceWriter::new(Some(&path)).unwrap();
         assert!(TraceWriter::new(Some(&path)).is_err());
-        trace.count = 99_999;
+        trace.count = TRACE_LIMIT - 1;
         trace.emit(|| serde_json::json!({"event":"queued","request_id":"test"}));
         trace.emit(|| panic!("limit emits truncation instead"));
         trace.emit(|| panic!("beyond limit stays lazy"));
@@ -87,5 +142,21 @@ mod tests {
         assert_eq!(lines[0]["schema_version"], 1);
         assert_eq!(lines[1]["event"], "truncated");
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn full_queue_drops_without_waiting() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let mut trace = TraceWriter {
+            sender: Some(sender),
+            worker: None,
+            dropped: Arc::new(AtomicU64::new(0)),
+            started: Instant::now(),
+            count: 0,
+        };
+        trace.emit(|| serde_json::json!({"event":"first"}));
+        trace.emit(|| serde_json::json!({"event":"second"}));
+        assert_eq!(trace.dropped_count(), 1);
+        assert_eq!(receiver.try_recv().unwrap()["event"], "first");
     }
 }

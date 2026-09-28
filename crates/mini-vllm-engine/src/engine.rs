@@ -223,8 +223,12 @@ pub fn spawn_engine(
     engine_seed: u64,
 ) -> mini_vllm_core::Result<EngineHandle> {
     config.validate()?;
-    let trace = crate::trace::TraceWriter::new(config.trace_jsonl.as_deref())
-        .map_err(|e| mini_vllm_core::Error::InvalidRequest(format!("opening trace: {e}")))?;
+    let metrics = Arc::new(Metrics::new());
+    let trace = crate::trace::TraceWriter::new_with_counter(
+        config.trace_jsonl.as_deref(),
+        metrics.trace_events_dropped.clone(),
+    )
+    .map_err(|e| mini_vllm_core::Error::InvalidRequest(format!("opening trace: {e}")))?;
     model
         .config()
         .validate()
@@ -238,7 +242,6 @@ pub fn spawn_engine(
     let vocab_size = model.vocab_size();
     let default_max_new_tokens = config.default_max_new_tokens;
     let (cmd_tx, cmd_rx) = mpsc::channel(config.command_channel_capacity);
-    let metrics = Arc::new(Metrics::new());
     let event_capacity = config.event_channel_capacity;
     let eos_ids = model.config().eos_token_ids.clone();
     let executor = Executor::new(Arc::clone(&model));
@@ -686,7 +689,7 @@ impl Engine {
             candidates.rotate_left(offset);
         }
         let prefill = self.scheduler.prefill_candidate().is_some();
-        let decode_budget = if prefill && budget == 1 && self.step_id % 2 == 0 {
+        let decode_budget = if prefill && budget == 1 && self.step_id.is_multiple_of(2) {
             0
         } else if prefill && budget > 1 {
             budget - 1

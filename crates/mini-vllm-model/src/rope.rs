@@ -26,7 +26,7 @@ impl RopeCache {
         dtype: DType,
         dev: &Device,
     ) -> Result<Self> {
-        assert!(head_dim % 2 == 0, "head_dim must be even for RoPE");
+        assert!(head_dim.is_multiple_of(2), "head_dim must be even for RoPE");
         let half = head_dim / 2;
         // inv_freq[j] = theta^(-2j / head_dim)
         let inv_freq: Vec<f32> = (0..half)

@@ -43,6 +43,8 @@ kernels (see the roadmap in [`DESIGN.md`](./DESIGN.md#13-已知限制与路线�
 
 ## Installation
 
+Rust 1.87 or newer is required. CI checks the declared minimum version against the locked dependencies, then runs the full suite on stable Rust.
+
 ```bash
 cargo build --release -p mini-vllm-cli        # Metal on macOS
 cargo build --release -p mini-vllm-cli --features cuda   # CUDA builds
