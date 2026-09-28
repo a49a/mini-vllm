@@ -128,6 +128,19 @@ impl PagedLayer {
         self.len = len;
         Ok(())
     }
+    pub fn share_prefix_from(&mut self, source: &Self, len: usize) -> Result<()> {
+        if self.block_size != source.block_size
+            || len % self.block_size != 0
+            || len > self.len
+            || len > source.len
+        {
+            candle_core::bail!("invalid canonical prefix");
+        }
+        for i in 0..len / self.block_size {
+            self.pages[i] = Arc::clone(&source.pages[i]);
+        }
+        Ok(())
+    }
     pub fn with_capacity(mut self, capacity: usize) -> Self {
         self.capacity = capacity;
         self

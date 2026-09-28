@@ -78,6 +78,7 @@ impl Scheduler {
                 .expect("front was just checked to exist");
             tracing::debug!(request_id = %seq.request.id, "request admitted to running set");
             seq.status = SequenceStatus::Prefill;
+            seq.admitted_at = Some(std::time::Instant::now());
             self.running.push(seq);
             admitted += 1;
         }
@@ -161,6 +162,38 @@ impl Scheduler {
     /// Cancellations of sequences that never reached `running`.
     pub fn take_retired_waiting(&mut self) -> Vec<SequenceGroup> {
         std::mem::take(&mut self.retired_waiting)
+    }
+
+    /// Expire at scheduling boundaries; device calls are never interrupted.
+    pub fn expire(&mut self, queue_ms: u64, request_ms: u64) {
+        for seq in self.waiting.iter_mut().chain(self.running.iter_mut()) {
+            if seq.is_terminal() {
+                continue;
+            }
+            let elapsed = seq.created_at.elapsed();
+            let queue_expired = seq.admitted_at.is_none()
+                && queue_ms > 0
+                && elapsed >= std::time::Duration::from_millis(queue_ms);
+            let request_expired =
+                request_ms > 0 && elapsed >= std::time::Duration::from_millis(request_ms);
+            if queue_expired || request_expired {
+                seq.failure = Some(
+                    if queue_expired {
+                        "queue timeout"
+                    } else {
+                        "request deadline exceeded"
+                    }
+                    .into(),
+                );
+                seq.failure_kind = mini_vllm_core::GenerationErrorKind::Timeout;
+                seq.finish_reason = Some(mini_vllm_core::FinishReason::Error);
+                seq.status = SequenceStatus::Failed;
+            }
+        }
+        let (retired, waiting): (Vec<_>, Vec<_>) =
+            self.waiting.drain(..).partition(|s| s.is_terminal());
+        self.waiting = waiting.into();
+        self.retired_waiting.extend(retired);
     }
 
     /// Drain every sequence (engine shutdown path).

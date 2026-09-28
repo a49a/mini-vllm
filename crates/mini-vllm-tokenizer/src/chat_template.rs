@@ -48,6 +48,11 @@ const IM_END: &str = "<|im_end|>";
 
 impl ChatTemplate for QwenChatTemplate {
     fn render(&self, messages: &[ChatMessage]) -> Result<String> {
+        if messages.is_empty() {
+            return Err(mini_vllm_core::Error::InvalidRequest(
+                "messages must not be empty".into(),
+            ));
+        }
         let mut out = String::new();
         for m in messages {
             match m.role.as_str() {

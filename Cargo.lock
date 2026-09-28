@@ -1392,6 +1392,7 @@ dependencies = [
  "mini-vllm-tokenizer",
  "rand",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

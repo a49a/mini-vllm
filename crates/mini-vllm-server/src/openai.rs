@@ -22,18 +22,14 @@ impl StopField {
     }
 }
 
-fn default_max_tokens() -> usize {
-    512
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompletionRequest {
     #[serde(default)]
     pub model: Option<String>,
     pub prompt: String,
-    #[serde(default = "default_max_tokens")]
-    pub max_tokens: usize,
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
     #[serde(default)]
     pub temperature: Option<f32>,
     #[serde(default)]
@@ -57,8 +53,8 @@ pub struct ChatCompletionRequest {
     #[serde(default)]
     pub model: Option<String>,
     pub messages: Vec<ChatMessageIn>,
-    #[serde(default = "default_max_tokens")]
-    pub max_tokens: usize,
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
     #[serde(default)]
     pub temperature: Option<f32>,
     #[serde(default)]
@@ -76,6 +72,7 @@ pub struct ChatCompletionRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChatMessageIn {
     pub role: String,
     pub content: String,

@@ -25,6 +25,9 @@ pub trait EngineApi: Send + Sync + 'static {
     >;
 
     fn cancel(&self, request_id: &str);
+    fn default_max_new_tokens(&self) -> usize {
+        mini_vllm_core::EngineConfig::default().default_max_new_tokens
+    }
 
     fn is_accepting(&self) -> bool {
         true
@@ -42,6 +45,10 @@ impl EngineApi for EngineHandle {
         mini_vllm_engine::EngineApiError,
     > {
         EngineHandle::generate(self, request)
+    }
+
+    fn default_max_new_tokens(&self) -> usize {
+        EngineHandle::default_max_new_tokens(self)
     }
 
     fn cancel(&self, request_id: &str) {

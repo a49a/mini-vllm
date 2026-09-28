@@ -17,6 +17,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 mini-vllm-tokenizer = { workspace = true, features = ["test-util"] }

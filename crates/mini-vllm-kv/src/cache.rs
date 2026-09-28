@@ -172,6 +172,20 @@ impl KvCache {
         }
     }
 
+    /// Replace identical, block-aligned history with canonical shared pages.
+    pub fn share_prefix_from(&mut self, source: &Self, len: usize) -> Result<()> {
+        let (Some(dst), Some(src)) = (&mut self.paged, &source.paged) else {
+            candle_core::bail!("canonical sharing requires paged storage");
+        };
+        if dst.len() != src.len() {
+            candle_core::bail!("prefix layer mismatch");
+        }
+        for (dst, src) in dst.iter_mut().zip(src) {
+            dst.share_prefix_from(src, len)?;
+        }
+        Ok(())
+    }
+
     pub fn is_paged(&self) -> bool {
         self.paged.is_some()
     }

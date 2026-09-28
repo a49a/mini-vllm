@@ -28,3 +28,7 @@ pub use request::{EngineApiError, EngineCommand};
 pub use sequence::{Emission, SequenceGroup};
 
 pub mod lifecycle;
+
+pub mod prefix;
+
+pub mod trace;

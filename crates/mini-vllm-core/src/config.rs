@@ -13,6 +13,12 @@ pub struct EngineConfig {
     pub max_prefill_chunk_tokens: usize,
     /// Emit teaching traces (request ids/positions only, never prompt text).
     pub trace_requests: bool,
+    /// Optional teaching JSONL file. Must not already exist.
+    pub trace_jsonl: Option<std::path::PathBuf>,
+    /// Submission-to-admission timeout; zero disables.
+    pub queue_timeout_ms: u64,
+    /// Submission-to-generation-completion deadline; zero disables.
+    pub request_timeout_ms: u64,
     /// Token count per KV "block" used by the block manager for accounting.
     pub kv_block_size: usize,
     /// Total KV cache budget expressed in tokens (converted to blocks).
@@ -41,6 +47,9 @@ impl Default for EngineConfig {
             max_batch_tokens: 2048,
             max_prefill_chunk_tokens: 256,
             trace_requests: false,
+            trace_jsonl: None,
+            queue_timeout_ms: 0,
+            request_timeout_ms: 0,
             kv_block_size: 16,
             max_kv_tokens: 32 * 1024,
             max_waiting_requests: 256,

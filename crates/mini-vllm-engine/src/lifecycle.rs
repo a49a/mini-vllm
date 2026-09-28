@@ -10,6 +10,7 @@ pub type Registry = Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>;
 #[derive(Debug)]
 pub struct RequestLease {
     pub id: String,
+    pub submitted_at: std::time::Instant,
     pub cancelled: Arc<AtomicBool>,
     pub registry: Registry,
 }

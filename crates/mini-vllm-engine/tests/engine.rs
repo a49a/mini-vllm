@@ -696,6 +696,25 @@ async fn backend_dtype_lifecycle() {
     let cancelled = handle.generate(req("cancel", vec![5; 32], 16)).unwrap();
     handle.cancel("cancel").unwrap();
     assert_eq!(drain(cancelled).await.1, FinishReason::Cancelled);
+    // Backend stress: interleave shared prefixes, cancellation and disconnects.
+    let mut receivers = Vec::new();
+    for i in 0..24 {
+        let id = format!("stress-{i}");
+        let rx = handle
+            .generate(req(&id, vec![4 + (i % 2) as u32; 9], 4))
+            .unwrap();
+        if i % 3 == 0 {
+            handle.cancel(&id).unwrap();
+        }
+        if i % 5 == 0 {
+            drop(rx);
+        } else {
+            receivers.push(rx);
+        }
+    }
+    for rx in receivers {
+        drain_tolerant(rx).await;
+    }
     handle.request_shutdown(
         mini_vllm_engine::ShutdownMode::Drain,
         Duration::from_secs(5),

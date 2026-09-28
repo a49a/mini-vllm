@@ -56,6 +56,8 @@ pub struct SequenceGroup {
     pub last_token_at: Option<Instant>,
     pub finish_reason: Option<FinishReason>,
     pub failure: Option<String>,
+    pub failure_kind: mini_vllm_core::GenerationErrorKind,
+    pub admitted_at: Option<Instant>,
     /// Set when the consumer is gone (channel closed or outbox overflow).
     pub consumer_gone: bool,
 }
@@ -93,6 +95,8 @@ impl SequenceGroup {
             last_token_at: None,
             finish_reason: None,
             failure: None,
+            failure_kind: mini_vllm_core::GenerationErrorKind::Execution,
+            admitted_at: None,
             consumer_gone: false,
         }
     }
@@ -245,7 +249,7 @@ impl SequenceGroup {
             let reason = self.finish_reason.unwrap_or(FinishReason::Error);
             let event = if reason == FinishReason::Error {
                 GenerationEvent::Error {
-                    kind: mini_vllm_core::GenerationErrorKind::Execution,
+                    kind: self.failure_kind,
                     message: self
                         .failure
                         .take()

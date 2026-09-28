@@ -88,6 +88,14 @@ enum Command {
         /// Log batch membership, positions and page changes for teaching.
         #[arg(long)]
         trace_request: bool,
+        #[arg(long)]
+        trace_jsonl: Option<PathBuf>,
+        #[arg(long, default_value_t = 512)]
+        default_max_new_tokens: usize,
+        #[arg(long, default_value_t = 0)]
+        queue_timeout_ms: u64,
+        #[arg(long, default_value_t = 0)]
+        request_timeout_ms: u64,
         #[arg(long, default_value_t = 30)]
         shutdown_timeout_secs: u64,
         /// Total KV budget in tokens.
@@ -274,6 +282,10 @@ fn cmd_serve(args: Command) -> Result<()> {
         max_batch_tokens,
         max_prefill_chunk_tokens,
         trace_request,
+        trace_jsonl,
+        default_max_new_tokens,
+        queue_timeout_ms,
+        request_timeout_ms,
         shutdown_timeout_secs,
         max_kv_tokens,
         max_waiting_requests,
@@ -307,6 +319,10 @@ fn cmd_serve(args: Command) -> Result<()> {
         max_batch_tokens,
         max_prefill_chunk_tokens,
         trace_requests: trace_request,
+        trace_jsonl,
+        default_max_new_tokens,
+        queue_timeout_ms,
+        request_timeout_ms,
         max_kv_tokens,
         max_waiting_requests,
         output_drain_timeout_ms,

@@ -542,3 +542,107 @@ async fn tcp_disconnect_cancels_an_unfinished_request() {
     .unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn empty_messages_and_nested_unknown_fields_are_rejected() {
+    for body in [
+        serde_json::json!({"messages":[],"max_tokens":1}),
+        serde_json::json!({"messages":[{"role":"user","content":"a","tool_calls":[]}],"max_tokens":1}),
+    ] {
+        let response = post_json("/v1/chat/completions", body.to_string()).await;
+        assert!(response.status().is_client_error());
+    }
+}
+
+struct DefaultsEngine;
+impl EngineApi for DefaultsEngine {
+    fn default_max_new_tokens(&self) -> usize {
+        3
+    }
+    fn generate(
+        &self,
+        request: GenerationRequest,
+    ) -> Result<mpsc::Receiver<GenerationEvent>, mini_vllm_engine::EngineApiError> {
+        let (tx, rx) = mpsc::channel(1);
+        tx.try_send(GenerationEvent::Finished {
+            reason: FinishReason::Length,
+            usage: Usage {
+                prompt_tokens: request.prompt_token_ids.len(),
+                completion_tokens: request.max_new_tokens,
+                total_tokens: request.prompt_token_ids.len() + request.max_new_tokens,
+            },
+        })
+        .unwrap();
+        Ok(rx)
+    }
+    fn cancel(&self, _: &str) {}
+    fn metrics(&self) -> mini_vllm_engine::MetricsSnapshot {
+        mini_vllm_engine::Metrics::new().snapshot()
+    }
+}
+#[tokio::test]
+async fn omitted_limits_use_engine_default_and_explicit_limits_win() {
+    for chat in [false, true] {
+        for limit in [None, Some(2)] {
+            let (state, _) = state();
+            let app = routes::router(std::sync::Arc::new(AppState {
+                engine: std::sync::Arc::new(DefaultsEngine),
+                tokenizer: state.tokenizer.clone(),
+                template: state.template.clone(),
+                model_id: state.model_id.clone(),
+                max_model_len: 64,
+                vocab_size: 12,
+            }));
+            let mut body = if chat {
+                serde_json::json!({"messages":[{"role":"user","content":"a"}]})
+            } else {
+                serde_json::json!({"prompt":"a"})
+            };
+            if let Some(limit) = limit {
+                body["max_tokens"] = limit.into();
+            }
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(if chat {
+                            "/v1/chat/completions"
+                        } else {
+                            "/v1/completions"
+                        })
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(json["usage"]["completion_tokens"], limit.unwrap_or(3));
+        }
+    }
+}
+
+#[tokio::test]
+async fn engine_deadline_maps_to_gateway_timeout() {
+    let (state, mock) = state();
+    *mock.events.lock().unwrap() = vec![GenerationEvent::Error {
+        kind: mini_vllm_core::GenerationErrorKind::Timeout,
+        message: "deadline exceeded".into(),
+    }];
+    let response = routes::router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/completions")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"prompt":"a","max_tokens":1}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+}

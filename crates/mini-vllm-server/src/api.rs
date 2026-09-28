@@ -163,6 +163,7 @@ async fn collect(
                     mini_vllm_core::GenerationErrorKind::Overloaded => {
                         StatusCode::SERVICE_UNAVAILABLE
                     }
+                    mini_vllm_core::GenerationErrorKind::Timeout => StatusCode::GATEWAY_TIMEOUT,
                     mini_vllm_core::GenerationErrorKind::Execution => {
                         StatusCode::INTERNAL_SERVER_ERROR
                     }
@@ -194,7 +195,8 @@ pub async fn completions(
         );
     }
     let sampling = resolve_sampling(
-        req.max_tokens,
+        req.max_tokens
+            .unwrap_or_else(|| state.engine.default_max_new_tokens()),
         req.temperature,
         req.top_p,
         req.top_k,
@@ -257,7 +259,8 @@ pub async fn chat_completions(
         );
     }
     let sampling = resolve_sampling(
-        req.max_tokens,
+        req.max_tokens
+            .unwrap_or_else(|| state.engine.default_max_new_tokens()),
         req.temperature,
         req.top_p,
         req.top_k,

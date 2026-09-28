@@ -159,6 +159,7 @@ pub struct Usage {
 pub enum GenerationErrorKind {
     InvalidRequest,
     Overloaded,
+    Timeout,
     Execution,
 }
 impl GenerationErrorKind {
@@ -166,6 +167,7 @@ impl GenerationErrorKind {
         match self {
             Self::InvalidRequest => "invalid_request_error",
             Self::Overloaded => "engine_overloaded",
+            Self::Timeout => "request_timeout",
             Self::Execution => "internal_error",
         }
     }

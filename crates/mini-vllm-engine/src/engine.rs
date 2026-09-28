@@ -7,7 +7,8 @@
 //! immutable physical pages under a separate bounded LRU budget.
 
 use crate::lifecycle::{Registry, RequestLease};
-use std::collections::{HashMap, VecDeque};
+use crate::prefix::PrefixCache;
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -49,6 +50,7 @@ pub struct EngineHandle {
     max_outstanding: usize,
     max_model_len: usize,
     vocab_size: usize,
+    default_max_new_tokens: usize,
 }
 
 impl EngineHandle {
@@ -92,6 +94,7 @@ impl EngineHandle {
             registry.insert(request.id.clone(), Arc::clone(&cancelled));
             RequestLease {
                 id: request.id.clone(),
+                submitted_at: Instant::now(),
                 cancelled,
                 registry: Arc::clone(&self.registry),
             }
@@ -202,6 +205,10 @@ impl EngineHandle {
         }
     }
 
+    pub fn default_max_new_tokens(&self) -> usize {
+        self.default_max_new_tokens
+    }
+
     pub fn metrics(&self) -> &Arc<Metrics> {
         &self.metrics
     }
@@ -216,6 +223,8 @@ pub fn spawn_engine(
     engine_seed: u64,
 ) -> mini_vllm_core::Result<EngineHandle> {
     config.validate()?;
+    let trace = crate::trace::TraceWriter::new(config.trace_jsonl.as_deref())
+        .map_err(|e| mini_vllm_core::Error::InvalidRequest(format!("opening trace: {e}")))?;
     model
         .config()
         .validate()
@@ -227,6 +236,7 @@ pub fn spawn_engine(
         .max_model_len
         .min(model.config().max_position_embeddings);
     let vocab_size = model.vocab_size();
+    let default_max_new_tokens = config.default_max_new_tokens;
     let (cmd_tx, cmd_rx) = mpsc::channel(config.command_channel_capacity);
     let metrics = Arc::new(Metrics::new());
     let event_capacity = config.event_channel_capacity;
@@ -235,20 +245,21 @@ pub fn spawn_engine(
     let blocks = KvBlockManager::new(config.kv_block_size, config.max_kv_tokens);
     let scheduler = Scheduler::new(config.max_num_seqs, config.max_batch_tokens);
     let engine = Engine {
+        trace,
         control: Arc::clone(&control),
         cmd_rx,
         executor,
         tokenizer,
         scheduler,
         blocks,
+        prefix_cache: PrefixCache::new(config.kv_block_size, config.prefix_cache_tokens),
         config,
         eos_ids,
         metrics: Arc::clone(&metrics),
         engine_seed,
         rng_counter: 0,
         finishing: Vec::new(),
-        prefix_cache: VecDeque::new(),
-        prefix_tokens: 0,
+
         decode_cursor: 0,
         prefill_cursor: 0,
         step_id: 0,
@@ -267,10 +278,12 @@ pub fn spawn_engine(
         max_outstanding,
         max_model_len,
         vocab_size,
+        default_max_new_tokens,
     })
 }
 
 struct Engine {
+    trace: crate::trace::TraceWriter,
     control: Arc<Control>,
     cmd_rx: mpsc::Receiver<EngineCommand>,
     executor: Executor,
@@ -283,8 +296,7 @@ struct Engine {
     engine_seed: u64,
     rng_counter: u64,
     finishing: Vec<(SequenceGroup, Instant)>,
-    prefix_cache: VecDeque<(Vec<u32>, KvCache, Arc<()>)>,
-    prefix_tokens: usize,
+    prefix_cache: PrefixCache,
     decode_cursor: usize,
     prefill_cursor: usize,
     step_id: u64,
@@ -338,7 +350,7 @@ impl Engine {
                 && self.cmd_rx.is_empty()
             {
                 self.prefix_cache.clear();
-                self.prefix_tokens = 0;
+
                 self.update_gauges();
                 break;
             }
@@ -387,6 +399,22 @@ impl Engine {
             // means the caller already left, which is fine.
             let _ = events.try_send(GenerationEvent::Error { kind, message: msg });
         };
+        let submitted = lease
+            .as_ref()
+            .map(|lease| lease.submitted_at)
+            .unwrap_or_else(Instant::now);
+        let elapsed = submitted.elapsed();
+        if (self.config.queue_timeout_ms > 0
+            && elapsed >= Duration::from_millis(self.config.queue_timeout_ms))
+            || (self.config.request_timeout_ms > 0
+                && elapsed >= Duration::from_millis(self.config.request_timeout_ms))
+        {
+            reject(
+                mini_vllm_core::GenerationErrorKind::Timeout,
+                "request expired in command queue".into(),
+            );
+            return;
+        }
         if let Err(e) = request.validate(self.effective_max_model_len()) {
             reject(
                 mini_vllm_core::GenerationErrorKind::InvalidRequest,
@@ -444,6 +472,9 @@ impl Engine {
             stop_ids,
             self.config.event_channel_capacity,
         );
+        self.trace
+            .emit(|| serde_json::json!({"event":"queued", "request_id":seq.request.id}));
+        seq.created_at = submitted;
         seq.lease = lease;
         if self.config.trace_requests {
             tracing::info!(target: "mini_vllm_trace", request_id = %seq.request.id, "request queued");
@@ -468,6 +499,8 @@ impl Engine {
 
     fn step(&mut self) -> bool {
         self.scheduler.cancel_disconnected();
+        self.scheduler
+            .expire(self.config.queue_timeout_ms, self.config.request_timeout_ms);
         self.retire();
         self.admit_waiting();
         let did = self.run_mixed_step();
@@ -485,6 +518,11 @@ impl Engine {
             let _ = self.blocks.release(&seq.request.id);
             drop(seq.take_cache());
             seq.prefix_pin = None;
+            self.trace.emit(|| {
+                serde_json::json!({"event":"retired", "request_id":seq.request.id,
+                "reason":seq.finish_reason.map(|r| r.as_str()), "error":seq.failure,
+                "prefix_tokens":self.prefix_cache.tokens()})
+            });
             if self.config.trace_requests {
                 tracing::info!(target: "mini_vllm_trace", request_id = %seq.request.id, reason = ?seq.finish_reason, "KV released; output draining");
             }
@@ -535,16 +573,7 @@ impl Engine {
         let admitted = {
             let mut available = self.blocks.free_block_count();
             self.scheduler.admit(|req| {
-                let shared = self
-                    .prefix_cache
-                    .iter()
-                    .filter(|(tokens, _, _)| {
-                        tokens.len() < req.prompt_token_ids.len()
-                            && req.prompt_token_ids.starts_with(tokens)
-                    })
-                    .map(|(tokens, _, _)| tokens.len())
-                    .max()
-                    .unwrap_or(0);
+                let shared = self.prefix_cache.matched_tokens(&req.prompt_token_ids);
                 let needed = blocks_for_tokens(
                     req.prompt_token_ids.len() + req.max_new_tokens - shared,
                     block_size,
@@ -583,16 +612,7 @@ impl Engine {
                 continue;
             }
             let prompt = &self.scheduler.running()[idx].request.prompt_token_ids;
-            let hit = self
-                .prefix_cache
-                .iter()
-                .enumerate()
-                .filter(|(_, (tokens, _, _))| {
-                    tokens.len() < prompt.len() && prompt.starts_with(tokens)
-                })
-                .max_by_key(|(_, (tokens, _, _))| tokens.len())
-                .map(|(i, _)| i);
-            let shared_len = hit.map(|i| self.prefix_cache[i].0.len()).unwrap_or(0);
+            let shared_len = self.prefix_cache.matched_tokens(prompt);
             if let Err(e) = self.blocks.allocate(&id, horizon - shared_len) {
                 tracing::error!(request_id = %id, error = %e, "block allocation failed after admission");
                 let seq = self.scheduler.running_get_mut(idx).expect("idx valid");
@@ -608,35 +628,38 @@ impl Engine {
             match fresh {
                 Ok(mut cache) => {
                     cache.track_allocations(Arc::clone(&self.metrics.kv_storage_allocations_total));
-                    if let Some(hit) = hit {
-                        let entry = self.prefix_cache.remove(hit).expect("prefix index exists");
-                        if let Ok(shared) = entry.1.fork_prefix(entry.0.len(), horizon) {
-                            self.scheduler
-                                .running_get_mut(idx)
-                                .expect("idx valid")
-                                .prefill_position = entry.0.len();
-                            self.metrics
-                                .prefix_cache_hit_tokens
-                                .fetch_add(entry.0.len() as u64, Ordering::Relaxed);
-                            self.scheduler.running_get_mut(idx).unwrap().prefix_pin =
-                                Some(Arc::clone(&entry.2));
-                            if self.config.trace_requests {
-                                tracing::info!(target: "mini_vllm_trace", request_id = %id, prefix_tokens = entry.0.len(), "prefix hit");
+                    if shared_len > 0 {
+                        let prompt = &self.scheduler.running()[idx].request.prompt_token_ids;
+                        match self.prefix_cache.borrow(prompt, horizon) {
+                            Ok(Some((shared, pin))) => {
+                                let seq = self.scheduler.running_get_mut(idx).unwrap();
+                                seq.prefill_position = shared_len;
+                                seq.prefix_pin = Some(pin);
+                                self.metrics
+                                    .prefix_cache_hit_tokens
+                                    .fetch_add(shared_len as u64, Ordering::Relaxed);
+                                cache = shared;
+                                if self.config.trace_requests {
+                                    tracing::info!(target: "mini_vllm_trace", request_id = %id, prefix_tokens = shared_len, "prefix hit");
+                                }
                             }
-                            cache = shared;
-                        } else {
-                            self.prefix_cache.push_back(entry);
-                            let seq = self.scheduler.running_get_mut(idx).expect("idx valid");
-                            seq.failure = Some("failed to attach reserved shared prefix".into());
-                            finish_sequence(seq, FinishReason::Error);
-                            continue;
+                            _ => {
+                                let seq = self.scheduler.running_get_mut(idx).unwrap();
+                                seq.failure =
+                                    Some("failed to attach reserved shared prefix".into());
+                                finish_sequence(seq, FinishReason::Error);
+                                continue;
+                            }
                         }
-                        self.prefix_cache.push_back(entry);
                     }
                     self.scheduler
                         .running_get_mut(idx)
                         .expect("idx valid")
                         .restore_cache(cache);
+                    self.trace.emit(|| {
+                        serde_json::json!({"event":"admitted", "request_id":id,
+                        "reserved_tokens":horizon-shared_len, "shared_prefix_tokens":shared_len})
+                    });
                     if self.config.trace_requests {
                         tracing::info!(target: "mini_vllm_trace", request_id = %id, reserved_tokens = horizon - shared_len, "request admitted");
                     }
@@ -704,6 +727,18 @@ impl Engine {
         self.prefill_cursor = self.prefill_cursor.wrapping_add(served);
         if plan.is_empty() {
             return false;
+        }
+        for (idx, count) in &plan {
+            let seq = &self.scheduler.running()[*idx];
+            let position = if seq.status == SequenceStatus::Prefill {
+                seq.prefill_position
+            } else {
+                seq.next_input_position() as usize
+            };
+            self.trace.emit(|| serde_json::json!({"event":"scheduled", "step":self.step_id, "request_id":seq.request.id,
+                "phase":format!("{:?}",seq.status), "position":position, "tokens":count,
+                "pages_before":position.div_ceil(self.config.kv_block_size),
+                "pages_after":(position+count).div_ceil(self.config.kv_block_size)}));
         }
         // Borrow in sequence order; every output maps to this sorted plan.
         plan.sort_unstable_by_key(|p| p.0);
@@ -794,7 +829,12 @@ impl Engine {
     }
 
     fn after_chunk(&mut self, idx: usize, n: usize, token: Option<u32>) {
+        self.scheduler
+            .expire(self.config.queue_timeout_ms, self.config.request_timeout_ms);
         let seq = self.scheduler.running_get_mut(idx).expect("idx valid");
+        if seq.is_terminal() {
+            return;
+        }
         if seq.status == SequenceStatus::Prefill {
             seq.prefill_position += n;
             self.metrics
@@ -803,36 +843,23 @@ impl Engine {
             let prefix_len = seq.prefill_position.min(seq.prompt_len().saturating_sub(1))
                 / self.config.kv_block_size
                 * self.config.kv_block_size;
-            if prefix_len > 0 && prefix_len <= self.config.prefix_cache_tokens {
-                let key = seq.request.prompt_token_ids[..prefix_len].to_vec();
-                if !self.prefix_cache.iter().any(|(k, _, _)| *k == key) {
-                    if let Some(cache) = seq.take_cache() {
-                        if let Ok(prefix) = cache.fork_prefix(prefix_len, prefix_len) {
-                            while self.prefix_tokens + prefix_len > self.config.prefix_cache_tokens
-                            {
-                                // An active borrower keeps its prefix charged to the
-                                // retention pool. Eviction must never make it unaccounted.
-                                if let Some(i) = self
-                                    .prefix_cache
-                                    .iter()
-                                    .position(|(_, _, pin)| Arc::strong_count(pin) == 1)
-                                {
-                                    let (key, _, _) = self.prefix_cache.remove(i).unwrap();
-                                    self.prefix_tokens -= key.len();
-                                } else {
-                                    break;
-                                }
-                            }
-                            if self.prefix_tokens + prefix_len <= self.config.prefix_cache_tokens {
-                                self.prefix_tokens += prefix_len;
-                                self.prefix_cache.push_back((key, prefix, Arc::new(())));
-                            }
-                        }
-                        seq.restore_cache(cache);
+            if prefix_len > 0 && self.config.prefix_cache_tokens > 0 {
+                if let Some(mut cache) = seq.take_cache() {
+                    if let Err(error) = self
+                        .prefix_cache
+                        .insert(&seq.request.prompt_token_ids[..prefix_len], &mut cache)
+                    {
+                        tracing::warn!(%error, "prefix insertion failed");
                     }
+                    seq.restore_cache(cache);
                 }
             }
         }
+        self.trace.emit(|| {
+            serde_json::json!({"event":"computed", "step":self.step_id,
+            "request_id":seq.request.id, "phase":format!("{:?}",seq.status),
+            "prefix_tokens":self.prefix_cache.tokens()})
+        });
         if let Some(token) = token {
             self.after_sample(idx, token);
         }
@@ -911,7 +938,7 @@ impl Engine {
             .store(self.finishing.len() as u64, Ordering::Relaxed);
         self.metrics
             .cached_prefix_tokens
-            .store(self.prefix_tokens as u64, Ordering::Relaxed);
+            .store(self.prefix_cache.tokens() as u64, Ordering::Relaxed);
         let usage = self.blocks.usage();
         self.metrics
             .kv_blocks_total
@@ -941,6 +968,7 @@ impl Engine {
             .into_iter()
             .map(|(s, _)| s);
         for mut seq in waiting.into_iter().chain(running).chain(finishing) {
+            self.trace.emit(|| serde_json::json!({"event":"retired", "request_id":seq.request.id, "reason":"shutdown"}));
             // Running sequences own block tables; release them explicitly.
             let _ = self.blocks.release(&seq.request.id);
             seq.emit_terminal(GenerationEvent::Finished {
@@ -952,7 +980,7 @@ impl Engine {
             tracing::info!(cancelled = n, "engine shutdown: cancelled requests");
         }
         self.prefix_cache.clear();
-        self.prefix_tokens = 0;
+
         self.update_gauges();
     }
 }
@@ -984,20 +1012,21 @@ mod tests {
         ));
         let (_tx, cmd_rx) = mpsc::channel(4);
         Engine {
+            trace: crate::trace::TraceWriter::new(None).unwrap(),
             control: Arc::new(Control::default()),
             cmd_rx,
             executor: Executor::new(model),
             tokenizer: None,
             scheduler: Scheduler::new(config.max_num_seqs, config.max_batch_tokens),
             blocks: KvBlockManager::new(config.kv_block_size, config.max_kv_tokens),
+            prefix_cache: PrefixCache::new(config.kv_block_size, config.prefix_cache_tokens),
             config,
             eos_ids: vec![],
             metrics: Arc::new(Metrics::new()),
             engine_seed: 1,
             rng_counter: 0,
             finishing: Vec::new(),
-            prefix_cache: VecDeque::new(),
-            prefix_tokens: 0,
+
             decode_cursor: 0,
             prefill_cursor: 0,
             step_id: 0,
@@ -1069,6 +1098,7 @@ mod tests {
             max_outstanding: 2,
             max_model_len: 64,
             vocab_size: 64,
+            default_max_new_tokens: 512,
         };
         handle.cancel("target").unwrap();
         assert!(flag.load(Ordering::Relaxed));
@@ -1107,7 +1137,7 @@ mod tests {
         for _ in 0..10 {
             engine.step();
         }
-        assert_eq!(engine.prefix_tokens, 8);
+        assert_eq!(engine.prefix_cache.tokens(), 8);
         let _a = enqueue(&mut engine, "a", vec![4; 9], 3);
         let _b = enqueue(&mut engine, "b", vec![4; 9], 3);
         engine.admit_waiting();
@@ -1117,7 +1147,20 @@ mod tests {
             "both fit only when prefix is deducted"
         );
         assert_eq!(engine.blocks.usage().used_blocks, 2);
-        assert_eq!(Arc::strong_count(&engine.prefix_cache[0].2), 3);
+        assert_eq!(
+            Arc::strong_count(
+                engine
+                    .scheduler
+                    .running()
+                    .iter()
+                    .find(|s| s.request.id == "b")
+                    .unwrap()
+                    .prefix_pin
+                    .as_ref()
+                    .unwrap()
+            ),
+            3
+        );
         // A third, unrelated request can use the remaining block, but cannot
         // evict the shared prefix while its active borrowers still hold it.
         let _c = enqueue(&mut engine, "c", vec![5; 5], 1);
@@ -1125,18 +1168,31 @@ mod tests {
         assert_eq!(engine.blocks.usage().used_blocks, 4);
         engine.run_mixed_step();
         engine.run_mixed_step();
-        assert_eq!(engine.prefix_cache.len(), 1);
+        assert_eq!(engine.prefix_cache.tokens(), 8);
         assert_eq!(
-            engine.prefix_cache[0].0,
-            vec![4; 8],
+            engine.prefix_cache.matched_tokens(&[4; 9]),
+            8,
             "borrowed prefix must not be evicted"
         );
         engine.scheduler.cancel("a");
         engine.retire();
-        assert_eq!(Arc::strong_count(&engine.prefix_cache[0].2), 2);
+        assert_eq!(
+            Arc::strong_count(
+                engine
+                    .scheduler
+                    .running()
+                    .iter()
+                    .find(|s| s.request.id == "b")
+                    .unwrap()
+                    .prefix_pin
+                    .as_ref()
+                    .unwrap()
+            ),
+            2
+        );
         engine.shutdown_all();
         assert_eq!(engine.blocks.usage().used_blocks, 0);
-        assert_eq!(engine.prefix_tokens, 0);
+        assert_eq!(engine.prefix_cache.tokens(), 0);
     }
 
     #[test]
@@ -1203,5 +1259,97 @@ mod tests {
                 .unwrap();
             assert_eq!(s.prefill_position, 1, "both prefills should receive a turn");
         }
+    }
+    #[test]
+    fn timeouts_expire_waiting_and_running_without_leaking_capacity() {
+        let mut engine = test_engine(EngineConfig {
+            max_num_seqs: 1,
+            queue_timeout_ms: 1,
+            request_timeout_ms: 10,
+            ..EngineConfig::default()
+        });
+        let mut running = enqueue(&mut engine, "running", vec![4; 16], 2);
+        engine.admit_waiting();
+        let mut waiting = enqueue(&mut engine, "waiting", vec![5], 2);
+        // Aging the running sequence avoids timing-dependent model speed.
+        engine.scheduler.running_get_mut(0).unwrap().created_at =
+            Instant::now() - Duration::from_millis(20);
+        std::thread::sleep(Duration::from_millis(3));
+        engine.step();
+        for rx in [&mut running, &mut waiting] {
+            assert!(matches!(
+                rx.try_recv().unwrap(),
+                GenerationEvent::Error {
+                    kind: mini_vllm_core::GenerationErrorKind::Timeout,
+                    ..
+                }
+            ));
+        }
+        assert_eq!(engine.blocks.usage().used_blocks, 0);
+        assert_eq!(engine.scheduler.waiting_len(), 0);
+    }
+
+    #[test]
+    fn timeout_in_command_queue_uses_submission_timestamp() {
+        let mut engine = test_engine(EngineConfig {
+            queue_timeout_ms: 1,
+            ..EngineConfig::default()
+        });
+        let registry: Registry = Arc::new(Mutex::new(HashMap::new()));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        registry
+            .lock()
+            .unwrap()
+            .insert("old".into(), cancelled.clone());
+        let lease = RequestLease {
+            id: "old".into(),
+            submitted_at: Instant::now() - Duration::from_millis(20),
+            cancelled,
+            registry: registry.clone(),
+        };
+        let (tx, mut rx) = mpsc::channel(2);
+        engine.enqueue_request_with_lease(
+            GenerationRequest {
+                id: "old".into(),
+                prompt_token_ids: vec![4],
+                max_new_tokens: 1,
+                sampling: SamplingParams::default(),
+                stop_token_ids: vec![],
+                stop_strings: vec![],
+            },
+            tx,
+            Some(lease),
+        );
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            GenerationEvent::Error {
+                kind: mini_vllm_core::GenerationErrorKind::Timeout,
+                ..
+            }
+        ));
+        assert!(registry.lock().unwrap().is_empty());
+        assert_eq!(engine.scheduler.waiting_len(), 0);
+    }
+    #[test]
+    fn deadline_crossed_during_forward_does_not_emit_successful_token() {
+        let mut engine = test_engine(EngineConfig {
+            request_timeout_ms: 1,
+            ..EngineConfig::default()
+        });
+        let mut rx = enqueue(&mut engine, "deadline", vec![4], 1);
+        engine.admit_waiting();
+        engine.scheduler.running_get_mut(0).unwrap().created_at =
+            Instant::now() - Duration::from_millis(20);
+        engine.after_chunk(0, 1, Some(4));
+        engine.retire();
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            GenerationEvent::Error {
+                kind: mini_vllm_core::GenerationErrorKind::Timeout,
+                ..
+            }
+        ));
+        assert!(rx.try_recv().is_err());
+        assert_eq!(engine.blocks.usage().used_blocks, 0);
     }
 }
