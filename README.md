@@ -50,7 +50,7 @@ cargo build --release -p mini-vllm-cli        # Metal on macOS
 cargo build --release -p mini-vllm-cli --features cuda   # CUDA builds
 ```
 
-Model preparation (any Qwen2/2.5 directory works):
+Model preparation (Qwen2/2.5 weights; `serve` validates the bundled Qwen2.5 Instruct chat template — see [template compatibility](docs/chat-templates.md)):
 
 ```bash
 mkdir -p models/qwen2.5-0.5b-instruct && cd models/qwen2.5-0.5b-instruct
@@ -165,6 +165,7 @@ See [advanced runtime experiments](docs/ADVANCED_RUNTIME.md) for teaching exampl
 ## Performance measurement
 
 See the [three-mode CPU report](docs/benchmarks/online-kv-comparison.md) and [reproduction/device commands](docs/IMPLEMENTATION.md).
+See [bounded trace shutdown and metadata experiments](docs/runtime-hardening.md) for the paired trace matrix and standalone prefix measurements.
 Run `python3 scripts/compare_kv.py --model models/qwen2.5-0.5b-instruct` for fresh-server trials, RSS and KV allocation counts.
 
 Use `scripts/benchmark.py --requests 8 --concurrency 1 4 --max-tokens 32`.
@@ -211,4 +212,4 @@ Candle operations rather than a custom GPU kernel. See
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see [LICENSE](./LICENSE). The bundled Qwen chat template retains its [Apache-2.0 license and attribution](crates/mini-vllm-tokenizer/src/templates/LICENSE-Qwen).

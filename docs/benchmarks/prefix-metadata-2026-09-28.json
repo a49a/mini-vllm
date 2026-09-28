@@ -1,0 +1,38 @@
+[
+  {
+    "blocks": 16,
+    "insert_us": 17,
+    "key_tokens": 128,
+    "lookup_1000_us": 1157,
+    "lookup_allocations": 0,
+    "page_references": 16,
+    "replace_us": 21
+  },
+  {
+    "blocks": 64,
+    "insert_us": 26,
+    "key_tokens": 512,
+    "lookup_1000_us": 4602,
+    "lookup_allocations": 0,
+    "page_references": 64,
+    "replace_us": 38
+  },
+  {
+    "blocks": 256,
+    "insert_us": 121,
+    "key_tokens": 2048,
+    "lookup_1000_us": 18769,
+    "lookup_allocations": 0,
+    "page_references": 256,
+    "replace_us": 162
+  },
+  {
+    "blocks": 1024,
+    "insert_us": 405,
+    "key_tokens": 8192,
+    "lookup_1000_us": 87115,
+    "lookup_allocations": 0,
+    "page_references": 1024,
+    "replace_us": 808
+  }
+]

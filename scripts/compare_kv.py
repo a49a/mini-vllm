@@ -42,7 +42,27 @@ def get_json(port, path, host="127.0.0.1"):
         conn.close()
 
 
-def trial(args, mode, index, output):
+def distribution(values):
+    """Nearest-rank percentiles; keep N visible for small samples."""
+    import math
+    values = sorted(values)
+    return {'count': len(values), **{
+        f'p{p}': values[max(0, math.ceil(p / 100 * len(values)) - 1)] if values else None
+        for p in (50, 95, 99)}}
+
+
+def trial_order(modes, trials, trace, trace_matrix):
+    for index in range(trials):
+        rotation = index % len(modes)
+        for offset, mode in enumerate(modes[rotation:] + modes[:rotation]):
+            settings = [False, True] if trace_matrix else [trace]
+            if (index + offset) % 2:
+                settings.reverse()
+            for enabled in settings:
+                yield mode, index, enabled
+
+
+def trial(args, mode, index, output, trace):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
@@ -57,10 +77,10 @@ def trial(args, mode, index, output):
     if mode == 'prefix':
         command += ['--prefix-cache-tokens', '256']
     trace_path = None
-    if args.trace:
+    if trace:
         trace_path = output.parent / f'{output.stem}-{mode}-{index}-{uuid.uuid4().hex[:8]}.jsonl'
         command += ['--trace-jsonl', str(trace_path.resolve())]
-    log_path = output.parent / f'{output.stem}-{mode}-{index}.log'
+    log_path = output.parent / f'{output.stem}-{mode}-{index}-trace-{int(trace)}.log'
     samples, stop = [], threading.Event()
     with log_path.open('w') as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
@@ -102,10 +122,14 @@ def trial(args, mode, index, output):
             after = get_json(port, '/metrics')
             tokens = sum(row['tokens'] for row in results)
             ttft = [row['ttft'] * 1000 for row in results if row['ttft'] is not None]
-            return {'mode': mode, 'trial': index, 'command': command, 'successful': len(results),
+            return {'mode': mode, 'trial': index, 'trace': trace, 'command': command, 'successful': len(results),
                     'failures': errors, 'tokens': tokens, 'wall_seconds': elapsed,
                     'tokens_per_second': tokens / elapsed,
                     'ttft_ms_median': statistics.median(ttft) if ttft else None,
+                    'ttft_ms': distribution(ttft),
+                    'latency_ms': distribution([r['latency'] * 1000 for r in results]),
+                    'itl_ms': distribution([v * 1000 for r in results for v in r['intervals']]),
+                    'request_results': results,
                     'peak_process_rss_bytes': max(samples, default=None),
                     'kv_storage_allocations': after['kv_storage_allocations_total'] - before['kv_storage_allocations_total'],
                     'computed_prompt_tokens': after['prompt_tokens_total'] - before['prompt_tokens_total'],
@@ -138,7 +162,9 @@ def main():
     parser.add_argument('--trials', type=int, default=3)
     parser.add_argument('--modes', nargs='+', choices=['contiguous', 'paged', 'prefix'],
                         default=['contiguous', 'paged', 'prefix'])
-    parser.add_argument('--trace', action='store_true', help='record an opt-in JSONL trace during measured requests')
+    trace_options = parser.add_mutually_exclusive_group()
+    trace_options.add_argument('--trace-matrix', action='store_true', help='interleave paired trace off/on trials with alternating order')
+    trace_options.add_argument('--trace', action='store_true', help='record an opt-in JSONL trace during measured requests')
     parser.add_argument('--prompt-repeat', type=int, default=1,
                         help='repeat the prompt to create a deeper cached prefix')
     parser.add_argument('--prompt', default='Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work.')
@@ -150,16 +176,11 @@ def main():
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     report = {'platform': platform.platform(), 'settings': vars(args), 'rss_scope': 'process including load and warmup; excludes dedicated device VRAM', 'trials': [], 'binary_sha256': digest(args.binary), 'model_config_sha256': digest(Path(args.model) / 'config.json'), 'python_version': platform.python_version()}
-    for index in range(args.trials):
-        modes = args.modes.copy()
-        # Rotate order to reduce systematic cold/thermal ordering bias.
-        rotation = index % len(modes)
-        modes = modes[rotation:] + modes[:rotation]
-        for mode in modes:
-            row = trial(args, mode, index, output)
-            report['trials'].append(row)
-            output.write_text(json.dumps(report, indent=2) + '\n')
-            print(f'{mode} trial {index}: {row["tokens_per_second"]:.2f} tok/s, {len(row["failures"])} failures', flush=True)
+    for mode, index, enabled in trial_order(args.modes, args.trials, args.trace, args.trace_matrix):
+        row = trial(args, mode, index, output, enabled)
+        report['trials'].append(row)
+        output.write_text(json.dumps(report, indent=2) + '\n')
+        print(f'{mode} trial {index}, trace={enabled}: {row["tokens_per_second"]:.2f} tok/s, {len(row["failures"])} failures', flush=True)
     lines = ['# KV comparison / KV 对照实验', '',
              f'Platform: `{report["platform"]}`. Device: {args.device}; dtype: {args.dtype}.', '',
              'Warmup excluded from timing/allocations. RSS includes model loading and warmup; it is not VRAM. Allocation counts include persistent KV tensors only. Small samples are smoke measurements, not capacity claims.', '',
@@ -168,7 +189,14 @@ def main():
     for row in report['trials']:
         ttft = row['ttft_ms_median']
         rss = row['peak_process_rss_bytes']
-        lines.append(f'| {row["mode"]} | {"on" if args.trace else "off"} | {row["trial"]} | {row["successful"]}/{args.requests} | {row["tokens_per_second"]:.2f} | {round(ttft, 2) if ttft is not None else "n/a"} | {round(rss / 2**20, 2) if rss else "n/a"} | {row["kv_storage_allocations"]} | {row["computed_prompt_tokens"]} | {row["prefix_hit_tokens"]} | {row["trace_events_dropped"]} |')
+        lines.append(f'| {row["mode"]} | {"on" if row["trace"] else "off"} | {row["trial"]} | {row["successful"]}/{args.requests} | {row["tokens_per_second"]:.2f} | {round(ttft, 2) if ttft is not None else "n/a"} | {round(rss / 2**20, 2) if rss else "n/a"} | {row["kv_storage_allocations"]} | {row["computed_prompt_tokens"]} | {row["prefix_hit_tokens"]} | {row["trace_events_dropped"]} |')
+    lines += ['', 'Percentiles use nearest rank; request counts are small. Raw request latency, TTFT and token-event intervals are preserved in JSON.', '',
+              '| Mode | Trace | Trial | N | Latency P50 ms | P95 ms | P99 ms |',
+              '|---|---|---:|---:|---:|---:|---:|']
+    for row in report['trials']:
+        d = row['latency_ms']
+        values = ' | '.join(f'{d[k]:.2f}' if d[k] is not None else 'n/a' for k in ('p50', 'p95', 'p99'))
+        lines.append(f'| {row["mode"]} | {row["trace"]} | {row["trial"]} | {d["count"]} | {values} |')
     output.with_suffix('.md').write_text('\n'.join(lines) + '\n')
     return 1 if any(row['failures'] for row in report['trials']) else 0
 

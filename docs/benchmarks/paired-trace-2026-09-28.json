@@ -1,0 +1,879 @@
+{
+  "platform": "macOS-14.8.9-arm64-arm-64bit",
+  "settings": {
+    "binary": "target/release/mini-vllm",
+    "model": "models/qwen2.5-0.5b-instruct",
+    "device": "cpu",
+    "dtype": "f32",
+    "requests": 4,
+    "concurrency": 2,
+    "max_tokens": 4,
+    "trials": 3,
+    "modes": [
+      "prefix"
+    ],
+    "trace_matrix": true,
+    "trace": false,
+    "prompt_repeat": 10,
+    "prompt": "Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work. Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work.",
+    "output": "/tmp/mini-five-paired.json"
+  },
+  "rss_scope": "process including load and warmup; excludes dedicated device VRAM",
+  "trials": [
+    {
+      "mode": "prefix",
+      "trial": 0,
+      "trace": false,
+      "command": [
+        "/Users/ada/src/mini-vllm/target/release/mini-vllm",
+        "serve",
+        "--model",
+        "/Users/ada/src/mini-vllm/models/qwen2.5-0.5b-instruct",
+        "--device",
+        "cpu",
+        "--dtype",
+        "f32",
+        "--port",
+        "56606",
+        "--max-model-len",
+        "512",
+        "--max-kv-tokens",
+        "4096",
+        "--max-num-seqs",
+        "2",
+        "--max-batch-tokens",
+        "32",
+        "--max-prefill-chunk-tokens",
+        "16",
+        "--kv-block-size",
+        "8",
+        "--shutdown-timeout-secs",
+        "2",
+        "--prefix-cache-tokens",
+        "256"
+      ],
+      "successful": 4,
+      "failures": [],
+      "tokens": 16,
+      "wall_seconds": 1.0813705830369145,
+      "tokens_per_second": 14.796037779264994,
+      "ttft_ms_median": 187.00404203264043,
+      "ttft_ms": {
+        "count": 4,
+        "p50": 183.17516706883907,
+        "p95": 191.02354196365923,
+        "p99": 191.02354196365923
+      },
+      "latency_ms": {
+        "count": 4,
+        "p50": 530.3707919083536,
+        "p95": 545.4947920516133,
+        "p99": 545.4947920516133
+      },
+      "itl_ms": {
+        "count": 12,
+        "p50": 114.11666707135737,
+        "p95": 135.19458298105747,
+        "p99": 135.19458298105747
+      },
+      "request_results": [
+        {
+          "ttft": 0.19083291699644178,
+          "intervals": [
+            0.10948595800437033,
+            0.11411666707135737,
+            0.11542362498585135
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5298950000433251
+        },
+        {
+          "ttft": 0.19102354196365923,
+          "intervals": [
+            0.10965141595806926,
+            0.11402837501373142,
+            0.11546929203905165
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5303707919083536
+        },
+        {
+          "ttft": 0.18317516706883907,
+          "intervals": [
+            0.13519458298105747,
+            0.12010275002103299,
+            0.10696812497917563
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5454947920516133
+        },
+        {
+          "ttft": 0.18305524997413158,
+          "intervals": [
+            0.13519387505948544,
+            0.12011804094072431,
+            0.10705354204401374
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5454441659385338
+        }
+      ],
+      "peak_process_rss_bytes": 2078457856,
+      "kv_storage_allocations": 192,
+      "computed_prompt_tokens": 20,
+      "prefix_hit_tokens": 864,
+      "trace_events_dropped": 0,
+      "trace_path": null,
+      "metrics_after": {
+        "uptime_seconds": 4.008,
+        "requests_total": 5,
+        "requests_running": 0,
+        "requests_waiting": 0,
+        "requests_finishing": 0,
+        "cached_prefix_tokens": 216,
+        "kv_storage_allocations_total": 1536,
+        "trace_events_dropped": 0,
+        "trace_writer_errors": 0,
+        "trace_shutdown_timeouts": 0,
+        "requests_finished": 5,
+        "requests_cancelled": 0,
+        "requests_failed": 0,
+        "prompt_tokens_total": 241,
+        "generated_tokens_total": 20,
+        "prefill_steps_total": 16,
+        "decode_steps_total": 9,
+        "average_decode_batch_size": 1.6666666666666667,
+        "time_to_first_token_ms_avg": 668.3048,
+        "inter_token_latency_ms_avg": 114.16133333333333,
+        "request_latency_ms_avg": 1010.9126,
+        "tokens_per_second": 4.990019960079841,
+        "lifetime_tokens_per_second": 4.990019960079841,
+        "prefix_cache_hit_tokens": 864,
+        "scheduled_tokens_total": 256,
+        "model_steps_total": 25,
+        "kv_blocks_total": 512,
+        "kv_blocks_used": 0,
+        "kv_blocks_free": 512,
+        "kv_active_sequences": 0
+      }
+    },
+    {
+      "mode": "prefix",
+      "trial": 0,
+      "trace": true,
+      "command": [
+        "/Users/ada/src/mini-vllm/target/release/mini-vllm",
+        "serve",
+        "--model",
+        "/Users/ada/src/mini-vllm/models/qwen2.5-0.5b-instruct",
+        "--device",
+        "cpu",
+        "--dtype",
+        "f32",
+        "--port",
+        "56650",
+        "--max-model-len",
+        "512",
+        "--max-kv-tokens",
+        "4096",
+        "--max-num-seqs",
+        "2",
+        "--max-batch-tokens",
+        "32",
+        "--max-prefill-chunk-tokens",
+        "16",
+        "--kv-block-size",
+        "8",
+        "--shutdown-timeout-secs",
+        "2",
+        "--prefix-cache-tokens",
+        "256",
+        "--trace-jsonl",
+        "/private/tmp/mini-five-paired-prefix-0-fe299a5d.jsonl"
+      ],
+      "successful": 4,
+      "failures": [],
+      "tokens": 16,
+      "wall_seconds": 1.1776086249155924,
+      "tokens_per_second": 13.586857009600141,
+      "ttft_ms_median": 189.14179201237857,
+      "ttft_ms": {
+        "count": 4,
+        "p50": 189.0862500295043,
+        "p95": 307.57070798426867,
+        "p99": 307.57070798426867
+      },
+      "latency_ms": {
+        "count": 4,
+        "p50": 534.2150420183316,
+        "p95": 642.7867080783471,
+        "p99": 642.7867080783471
+      },
+      "itl_ms": {
+        "count": 12,
+        "p50": 114.43554109428078,
+        "p95": 155.84962500724941,
+        "p99": 155.84962500724941
+      },
+      "request_results": [
+        {
+          "ttft": 0.18919733399525285,
+          "intervals": [
+            0.11336841608863324,
+            0.11281174991745502,
+            0.11866000003647059
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5340908750658855
+        },
+        {
+          "ttft": 0.1890862500295043,
+          "intervals": [
+            0.113135541905649,
+            0.11285595805384219,
+            0.11911912495270371
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5342150420183316
+        },
+        {
+          "ttft": 0.15188329201191664,
+          "intervals": [
+            0.15584962500724941,
+            0.1198853749083355,
+            0.11443554109428078
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5421970420284197
+        },
+        {
+          "ttft": 0.30757070798426867,
+          "intervals": [
+            0.11976554209832102,
+            0.11457170790527016,
+            0.10082895902451128
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.6427867080783471
+        }
+      ],
+      "peak_process_rss_bytes": 2139553792,
+      "kv_storage_allocations": 192,
+      "computed_prompt_tokens": 20,
+      "prefix_hit_tokens": 864,
+      "trace_events_dropped": 0,
+      "trace_path": "/tmp/mini-five-paired-prefix-0-fe299a5d.jsonl",
+      "metrics_after": {
+        "uptime_seconds": 4.107,
+        "requests_total": 5,
+        "requests_running": 0,
+        "requests_waiting": 0,
+        "requests_finishing": 0,
+        "cached_prefix_tokens": 216,
+        "kv_storage_allocations_total": 1536,
+        "trace_events_dropped": 0,
+        "trace_writer_errors": 0,
+        "trace_shutdown_timeouts": 0,
+        "requests_finished": 5,
+        "requests_cancelled": 0,
+        "requests_failed": 0,
+        "prompt_tokens_total": 241,
+        "generated_tokens_total": 20,
+        "prefill_steps_total": 17,
+        "decode_steps_total": 10,
+        "average_decode_batch_size": 1.5,
+        "time_to_first_token_ms_avg": 679.7951999999999,
+        "inter_token_latency_ms_avg": 114.67139999999999,
+        "request_latency_ms_avg": 1023.929,
+        "tokens_per_second": 4.869734599464329,
+        "lifetime_tokens_per_second": 4.869734599464329,
+        "prefix_cache_hit_tokens": 864,
+        "scheduled_tokens_total": 256,
+        "model_steps_total": 26,
+        "kv_blocks_total": 512,
+        "kv_blocks_used": 0,
+        "kv_blocks_free": 512,
+        "kv_active_sequences": 0
+      }
+    },
+    {
+      "mode": "prefix",
+      "trial": 1,
+      "trace": true,
+      "command": [
+        "/Users/ada/src/mini-vllm/target/release/mini-vllm",
+        "serve",
+        "--model",
+        "/Users/ada/src/mini-vllm/models/qwen2.5-0.5b-instruct",
+        "--device",
+        "cpu",
+        "--dtype",
+        "f32",
+        "--port",
+        "56673",
+        "--max-model-len",
+        "512",
+        "--max-kv-tokens",
+        "4096",
+        "--max-num-seqs",
+        "2",
+        "--max-batch-tokens",
+        "32",
+        "--max-prefill-chunk-tokens",
+        "16",
+        "--kv-block-size",
+        "8",
+        "--shutdown-timeout-secs",
+        "2",
+        "--prefix-cache-tokens",
+        "256",
+        "--trace-jsonl",
+        "/private/tmp/mini-five-paired-prefix-1-6aaab1ac.jsonl"
+      ],
+      "successful": 4,
+      "failures": [],
+      "tokens": 16,
+      "wall_seconds": 1.2569178330013528,
+      "tokens_per_second": 12.729551272093996,
+      "ttft_ms_median": 275.22837492870167,
+      "ttft_ms": {
+        "count": 4,
+        "p50": 248.40779195073992,
+        "p95": 307.71820805966854,
+        "p99": 307.71820805966854
+      },
+      "latency_ms": {
+        "count": 4,
+        "p50": 623.2802079757676,
+        "p95": 634.6582089317963,
+        "p99": 634.6582089317963
+      },
+      "itl_ms": {
+        "count": 12,
+        "p50": 110.2941669523716,
+        "p95": 160.32195801381022,
+        "p99": 160.32195801381022
+      },
+      "request_results": [
+        {
+          "ttft": 0.14898266701493412,
+          "intervals": [
+            0.15319025004282594,
+            0.11017958295997232,
+            0.11004212498664856
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.522461042040959
+        },
+        {
+          "ttft": 0.3020489579066634,
+          "intervals": [
+            0.11015812505502254,
+            0.1102941669523716,
+            0.1007297079777345
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.6232802079757676
+        },
+        {
+          "ttft": 0.24840779195073992,
+          "intervals": [
+            0.16032195801381022,
+            0.11345649999566376,
+            0.11242737504653633
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.6346582089317963
+        },
+        {
+          "ttft": 0.30771820805966854,
+          "intervals": [
+            0.11328554200008512,
+            0.11268254194874316,
+            0.09911333303898573
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.6328609170159325
+        }
+      ],
+      "peak_process_rss_bytes": 2198716416,
+      "kv_storage_allocations": 192,
+      "computed_prompt_tokens": 20,
+      "prefix_hit_tokens": 864,
+      "trace_events_dropped": 0,
+      "trace_path": "/tmp/mini-five-paired-prefix-1-6aaab1ac.jsonl",
+      "metrics_after": {
+        "uptime_seconds": 4.163,
+        "requests_total": 5,
+        "requests_running": 0,
+        "requests_waiting": 0,
+        "requests_finishing": 0,
+        "cached_prefix_tokens": 216,
+        "kv_storage_allocations_total": 1536,
+        "trace_events_dropped": 0,
+        "trace_writer_errors": 0,
+        "trace_shutdown_timeouts": 0,
+        "requests_finished": 5,
+        "requests_cancelled": 0,
+        "requests_failed": 0,
+        "prompt_tokens_total": 241,
+        "generated_tokens_total": 20,
+        "prefill_steps_total": 18,
+        "decode_steps_total": 11,
+        "average_decode_batch_size": 1.3636363636363635,
+        "time_to_first_token_ms_avg": 705.9916,
+        "inter_token_latency_ms_avg": 114.08539999999999,
+        "request_latency_ms_avg": 1048.3474,
+        "tokens_per_second": 4.804227720393946,
+        "lifetime_tokens_per_second": 4.804227720393946,
+        "prefix_cache_hit_tokens": 864,
+        "scheduled_tokens_total": 256,
+        "model_steps_total": 27,
+        "kv_blocks_total": 512,
+        "kv_blocks_used": 0,
+        "kv_blocks_free": 512,
+        "kv_active_sequences": 0
+      }
+    },
+    {
+      "mode": "prefix",
+      "trial": 1,
+      "trace": false,
+      "command": [
+        "/Users/ada/src/mini-vllm/target/release/mini-vllm",
+        "serve",
+        "--model",
+        "/Users/ada/src/mini-vllm/models/qwen2.5-0.5b-instruct",
+        "--device",
+        "cpu",
+        "--dtype",
+        "f32",
+        "--port",
+        "56696",
+        "--max-model-len",
+        "512",
+        "--max-kv-tokens",
+        "4096",
+        "--max-num-seqs",
+        "2",
+        "--max-batch-tokens",
+        "32",
+        "--max-prefill-chunk-tokens",
+        "16",
+        "--kv-block-size",
+        "8",
+        "--shutdown-timeout-secs",
+        "2",
+        "--prefix-cache-tokens",
+        "256"
+      ],
+      "successful": 4,
+      "failures": [],
+      "tokens": 16,
+      "wall_seconds": 1.086239041062072,
+      "tokens_per_second": 14.72972282818704,
+      "ttft_ms_median": 196.6851045144722,
+      "ttft_ms": {
+        "count": 4,
+        "p50": 195.33154205419123,
+        "p95": 198.32058402244002,
+        "p99": 198.32058402244002
+      },
+      "latency_ms": {
+        "count": 4,
+        "p50": 526.2806250248104,
+        "p95": 559.8596249474213,
+        "p99": 559.8596249474213
+      },
+      "itl_ms": {
+        "count": 12,
+        "p50": 113.09562507085502,
+        "p95": 131.47354091051966,
+        "p99": 131.47354091051966
+      },
+      "request_results": [
+        {
+          "ttft": 0.19515216699801385,
+          "intervals": [
+            0.10754658305086195,
+            0.11364395904820412,
+            0.10943908290937543
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.525843209004961
+        },
+        {
+          "ttft": 0.19533154205419123,
+          "intervals": [
+            0.10752854193560779,
+            0.11368808301631361,
+            0.1097009580116719
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5262806250248104
+        },
+        {
+          "ttft": 0.19803866697475314,
+          "intervals": [
+            0.11309562507085502,
+            0.11708870797883719,
+            0.13119841704610735
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.559482958051376
+        },
+        {
+          "ttft": 0.19832058402244002,
+          "intervals": [
+            0.11298229091335088,
+            0.11706183408387005,
+            0.13147354091051966
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5598596249474213
+        }
+      ],
+      "peak_process_rss_bytes": 2094497792,
+      "kv_storage_allocations": 192,
+      "computed_prompt_tokens": 20,
+      "prefix_hit_tokens": 864,
+      "trace_events_dropped": 0,
+      "trace_path": null,
+      "metrics_after": {
+        "uptime_seconds": 4.026,
+        "requests_total": 5,
+        "requests_running": 0,
+        "requests_waiting": 0,
+        "requests_finishing": 0,
+        "cached_prefix_tokens": 216,
+        "kv_storage_allocations_total": 1536,
+        "trace_events_dropped": 0,
+        "trace_writer_errors": 0,
+        "trace_shutdown_timeouts": 0,
+        "requests_finished": 5,
+        "requests_cancelled": 0,
+        "requests_failed": 0,
+        "prompt_tokens_total": 241,
+        "generated_tokens_total": 20,
+        "prefill_steps_total": 16,
+        "decode_steps_total": 9,
+        "average_decode_batch_size": 1.6666666666666667,
+        "time_to_first_token_ms_avg": 677.1012,
+        "inter_token_latency_ms_avg": 112.4512,
+        "request_latency_ms_avg": 1014.6132,
+        "tokens_per_second": 4.967709885742673,
+        "lifetime_tokens_per_second": 4.967709885742673,
+        "prefix_cache_hit_tokens": 864,
+        "scheduled_tokens_total": 256,
+        "model_steps_total": 25,
+        "kv_blocks_total": 512,
+        "kv_blocks_used": 0,
+        "kv_blocks_free": 512,
+        "kv_active_sequences": 0
+      }
+    },
+    {
+      "mode": "prefix",
+      "trial": 2,
+      "trace": false,
+      "command": [
+        "/Users/ada/src/mini-vllm/target/release/mini-vllm",
+        "serve",
+        "--model",
+        "/Users/ada/src/mini-vllm/models/qwen2.5-0.5b-instruct",
+        "--device",
+        "cpu",
+        "--dtype",
+        "f32",
+        "--port",
+        "56723",
+        "--max-model-len",
+        "512",
+        "--max-kv-tokens",
+        "4096",
+        "--max-num-seqs",
+        "2",
+        "--max-batch-tokens",
+        "32",
+        "--max-prefill-chunk-tokens",
+        "16",
+        "--kv-block-size",
+        "8",
+        "--shutdown-timeout-secs",
+        "2",
+        "--prefix-cache-tokens",
+        "256"
+      ],
+      "successful": 4,
+      "failures": [],
+      "tokens": 16,
+      "wall_seconds": 1.1529214580077678,
+      "tokens_per_second": 13.877788368730492,
+      "ttft_ms_median": 189.319750003051,
+      "ttft_ms": {
+        "count": 4,
+        "p50": 189.3174999859184,
+        "p95": 293.52766601368785,
+        "p99": 293.52766601368785
+      },
+      "latency_ms": {
+        "count": 4,
+        "p50": 542.126625077799,
+        "p95": 610.1917080814019,
+        "p99": 610.1917080814019
+      },
+      "itl_ms": {
+        "count": 12,
+        "p50": 111.26250005327165,
+        "p95": 150.80687508452684,
+        "p99": 150.80687508452684
+      },
+      "request_results": [
+        {
+          "ttft": 0.18932200002018362,
+          "intervals": [
+            0.12899175006896257,
+            0.1113885419908911,
+            0.11239887494593859
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.542126625077799
+        },
+        {
+          "ttft": 0.1893174999859184,
+          "intervals": [
+            0.12920262501575053,
+            0.11126250005327165,
+            0.1122854579007253
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5421462079975754
+        },
+        {
+          "ttft": 0.14242979197297245,
+          "intervals": [
+            0.15080687508452684,
+            0.10955679090693593,
+            0.10821225005201995
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5110539579764009
+        },
+        {
+          "ttft": 0.29352766601368785,
+          "intervals": [
+            0.10955050005577505,
+            0.10827658395282924,
+            0.09879795799497515
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.6101917080814019
+        }
+      ],
+      "peak_process_rss_bytes": 2101329920,
+      "kv_storage_allocations": 192,
+      "computed_prompt_tokens": 20,
+      "prefix_hit_tokens": 864,
+      "trace_events_dropped": 0,
+      "trace_path": null,
+      "metrics_after": {
+        "uptime_seconds": 4.035,
+        "requests_total": 5,
+        "requests_running": 0,
+        "requests_waiting": 0,
+        "requests_finishing": 0,
+        "cached_prefix_tokens": 216,
+        "kv_storage_allocations_total": 1536,
+        "trace_events_dropped": 0,
+        "trace_writer_errors": 0,
+        "trace_shutdown_timeouts": 0,
+        "requests_finished": 5,
+        "requests_cancelled": 0,
+        "requests_failed": 0,
+        "prompt_tokens_total": 241,
+        "generated_tokens_total": 20,
+        "prefill_steps_total": 17,
+        "decode_steps_total": 10,
+        "average_decode_batch_size": 1.5,
+        "time_to_first_token_ms_avg": 678.6958000000001,
+        "inter_token_latency_ms_avg": 113.3954,
+        "request_latency_ms_avg": 1018.997,
+        "tokens_per_second": 4.956629491945477,
+        "lifetime_tokens_per_second": 4.956629491945477,
+        "prefix_cache_hit_tokens": 864,
+        "scheduled_tokens_total": 256,
+        "model_steps_total": 26,
+        "kv_blocks_total": 512,
+        "kv_blocks_used": 0,
+        "kv_blocks_free": 512,
+        "kv_active_sequences": 0
+      }
+    },
+    {
+      "mode": "prefix",
+      "trial": 2,
+      "trace": true,
+      "command": [
+        "/Users/ada/src/mini-vllm/target/release/mini-vllm",
+        "serve",
+        "--model",
+        "/Users/ada/src/mini-vllm/models/qwen2.5-0.5b-instruct",
+        "--device",
+        "cpu",
+        "--dtype",
+        "f32",
+        "--port",
+        "56744",
+        "--max-model-len",
+        "512",
+        "--max-kv-tokens",
+        "4096",
+        "--max-num-seqs",
+        "2",
+        "--max-batch-tokens",
+        "32",
+        "--max-prefill-chunk-tokens",
+        "16",
+        "--kv-block-size",
+        "8",
+        "--shutdown-timeout-secs",
+        "2",
+        "--prefix-cache-tokens",
+        "256",
+        "--trace-jsonl",
+        "/private/tmp/mini-five-paired-prefix-2-704d7551.jsonl"
+      ],
+      "successful": 4,
+      "failures": [],
+      "tokens": 16,
+      "wall_seconds": 1.2820137080270797,
+      "tokens_per_second": 12.480365771301125,
+      "ttft_ms_median": 274.39647901337594,
+      "ttft_ms": {
+        "count": 4,
+        "p50": 251.33712508250028,
+        "p95": 318.50649998523295,
+        "p99": 318.50649998523295
+      },
+      "latency_ms": {
+        "count": 4,
+        "p50": 619.4679170148447,
+        "p95": 662.8500419901684,
+        "p99": 662.8500419901684
+      },
+      "itl_ms": {
+        "count": 12,
+        "p50": 110.59370904695243,
+        "p95": 168.76262496225536,
+        "p99": 168.76262496225536
+      },
+      "request_results": [
+        {
+          "ttft": 0.14573529094923288,
+          "intervals": [
+            0.1517847500508651,
+            0.11002566700335592,
+            0.11035966698545963
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.5179450829746202
+        },
+        {
+          "ttft": 0.2974558329442516,
+          "intervals": [
+            0.1100538750179112,
+            0.11059370904695243,
+            0.10130166599992663
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.6194679170148447
+        },
+        {
+          "ttft": 0.2513371250825003,
+          "intervals": [
+            0.16876262496225536,
+            0.12513158295769244,
+            0.11759091704152524
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.6628500419901684
+        },
+        {
+          "ttft": 0.31850649998523295,
+          "intervals": [
+            0.12493458308745176,
+            0.11765137501060963,
+            0.10077241691760719
+          ],
+          "tokens": 4,
+          "finish": "length",
+          "latency": 0.6619107910664752
+        }
+      ],
+      "peak_process_rss_bytes": 2170421248,
+      "kv_storage_allocations": 192,
+      "computed_prompt_tokens": 20,
+      "prefix_hit_tokens": 864,
+      "trace_events_dropped": 0,
+      "trace_path": "/tmp/mini-five-paired-prefix-2-704d7551.jsonl",
+      "metrics_after": {
+        "uptime_seconds": 4.19,
+        "requests_total": 5,
+        "requests_running": 0,
+        "requests_waiting": 0,
+        "requests_finishing": 0,
+        "cached_prefix_tokens": 216,
+        "kv_storage_allocations_total": 1536,
+        "trace_events_dropped": 0,
+        "trace_writer_errors": 0,
+        "trace_shutdown_timeouts": 0,
+        "requests_finished": 5,
+        "requests_cancelled": 0,
+        "requests_failed": 0,
+        "prompt_tokens_total": 241,
+        "generated_tokens_total": 20,
+        "prefill_steps_total": 18,
+        "decode_steps_total": 11,
+        "average_decode_batch_size": 1.3636363636363635,
+        "time_to_first_token_ms_avg": 712.11,
+        "inter_token_latency_ms_avg": 116.6226,
+        "request_latency_ms_avg": 1062.073,
+        "tokens_per_second": 4.77326968973747,
+        "lifetime_tokens_per_second": 4.77326968973747,
+        "prefix_cache_hit_tokens": 864,
+        "scheduled_tokens_total": 256,
+        "model_steps_total": 27,
+        "kv_blocks_total": 512,
+        "kv_blocks_used": 0,
+        "kv_blocks_free": 512,
+        "kv_active_sequences": 0
+      }
+    }
+  ],
+  "binary_sha256": "f422110f0aa378c9348e5a9fc6710301868f935357c2d62d9cf57550d5b44f46",
+  "model_config_sha256": "18e18afcaccafade98daf13a54092927904649e1dd4eba8299ab717d5d94ff45",
+  "python_version": "3.10.9"
+}
