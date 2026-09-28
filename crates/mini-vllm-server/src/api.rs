@@ -65,8 +65,13 @@ pub async fn models(State(state): State<SharedState>) -> Response {
     JsonResponse(list).into_response()
 }
 
-pub async fn metrics(State(state): State<SharedState>) -> Response {
-    JsonResponse(state.engine.metrics()).into_response()
+pub async fn metrics(
+    State(state): State<SharedState>,
+    axum::Extension(processor): axum::Extension<crate::preprocessing::Preprocessor>,
+) -> Response {
+    let mut snapshot = serde_json::json!(state.engine.metrics());
+    snapshot["preprocessing"] = serde_json::json!(processor.snapshot());
+    JsonResponse(snapshot).into_response()
 }
 
 struct ResolvedSampling {

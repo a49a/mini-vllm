@@ -7,6 +7,7 @@
 pub mod api;
 pub mod openai;
 pub mod preprocessing;
+pub mod preprocessing_metrics;
 pub mod routes;
 pub mod streaming;
 
