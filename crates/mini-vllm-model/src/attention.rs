@@ -117,46 +117,79 @@ impl Attention {
         self.o_proj.forward(&attn)
     }
 
-    /// Block-addressed attention: K/V stay in their physical pages. Scores
-    /// share one softmax normalization across all pages, then each page's
-    /// value contribution is accumulated. This is a portable reference,
+    /// Block-addressed attention: K/V stay in their physical pages. An online softmax
+    /// accumulates maxima, normalization and values without concatenating scores. This is a portable reference,
     /// not a fused GPU PagedAttention kernel.
     fn attend_pages(&self, q: &Tensor, pages: &[(Tensor, Tensor)]) -> Result<Tensor> {
         let group = self.num_heads / self.num_kv_heads;
         let q_len = q.dim(1)?;
-        let mut scores = Vec::with_capacity(pages.len());
-        let mut values = Vec::with_capacity(pages.len());
-        let mut kv_len = 0;
-        for (k, v) in pages {
-            let k = repeat_kv(k, group)?;
-            scores.push(q.matmul(&k.transpose(1, 2)?)?.affine(self.scale, 0.0)?);
-            values.push(repeat_kv(v, group)?);
-            kv_len += k.dim(1)?;
+        let kv_len: usize = pages
+            .iter()
+            .map(|(k, _)| k.dim(1))
+            .collect::<Result<Vec<_>>>()?
+            .iter()
+            .sum();
+        if pages.is_empty() || q_len > kv_len {
+            candle_core::bail!("invalid paged attention lengths");
         }
-        let mut scores = Tensor::cat(&scores, 2)?;
-        if q_len > 1 {
-            scores = scores.broadcast_add(&causal_mask(
-                q_len,
-                kv_len,
-                kv_len - q_len,
-                q.dtype(),
-                q.device(),
-            )?)?;
-        }
-        let probs = softmax_last_dim(&scores)?;
+        let query_start = kv_len - q_len;
+        // Online softmax: running maximum m, denominator l, numerator o.
+        // Reductions/accumulation use F32 even when projections use F16/BF16.
+        let mut state: Option<(Tensor, Tensor, Tensor)> = None;
         let mut offset = 0;
-        let mut result: Option<Tensor> = None;
-        for v in values {
-            let len = v.dim(1)?;
-            let part = probs.narrow(2, offset, len)?.contiguous()?.matmul(&v)?;
-            result = Some(match result {
-                None => part,
-                Some(sum) => sum.add(&part)?,
+        for (k, v) in pages {
+            let len = k.dim(1)?;
+            if len == 0 {
+                candle_core::bail!("empty attention page");
+            }
+            let k = repeat_kv(k, group)?;
+            let v = repeat_kv(v, group)?.to_dtype(DType::F32)?;
+            let mut scores = q
+                .matmul(&k.transpose(1, 2)?)?
+                .to_dtype(DType::F32)?
+                .affine(self.scale, 0.0)?;
+            if q_len > 1 {
+                let mask: Vec<f32> = (0..q_len)
+                    .flat_map(|i| {
+                        (0..len).map(move |j| {
+                            if offset + j > query_start + i {
+                                f32::NEG_INFINITY
+                            } else {
+                                0.0
+                            }
+                        })
+                    })
+                    .collect();
+                scores =
+                    scores.broadcast_add(&Tensor::from_vec(mask, (q_len, len), q.device())?)?;
+            }
+            let page_max = scores.max(2)?.unsqueeze(2)?;
+            let (maximum, previous) = match state.take() {
+                None => (page_max, None),
+                Some((m, l, o)) => (m.maximum(&page_max)?, Some((m, l, o))),
+            };
+            // The first page includes position zero, visible to every query;
+            // later fully masked pages contribute zero without -inf - -inf.
+            let weights = scores.broadcast_sub(&maximum)?.exp()?;
+            let denominator = weights.sum(2)?.unsqueeze(2)?;
+            let numerator = weights.matmul(&v)?;
+            state = Some(match previous {
+                None => (maximum, denominator, numerator),
+                Some((m, l, o)) => {
+                    let scale = m.sub(&maximum)?.exp()?;
+                    (
+                        maximum,
+                        l.mul(&scale)?.add(&denominator)?,
+                        o.broadcast_mul(&scale)?.add(&numerator)?,
+                    )
+                }
             });
             offset += len;
         }
-        result
-            .ok_or_else(|| candle_core::Error::Msg("empty attention pages".into()))?
+        let (_, denominator, numerator) = state.expect("nonempty pages");
+        numerator
+            .broadcast_div(&denominator)?
+            .to_dtype(q.dtype())?
             .transpose(0, 1)?
             .contiguous()?
             .reshape((q_len, self.num_heads * self.head_dim))
@@ -397,5 +430,55 @@ mod tests {
             .to_vec1::<f32>()
             .unwrap();
         assert_eq!(out, vec![1.0, 1.0, 2.0, 2.0]);
+    }
+    #[test]
+    fn online_softmax_matches_dense_with_future_pages_and_extreme_scores() {
+        let cfg = tiny_cfg();
+        let attn = attention(&cfg);
+        for scale in [0.1f32, 20.] {
+            for qlen in [1, 3, 7] {
+                let make = |heads, len| {
+                    Tensor::from_vec(
+                        (0..heads * len * cfg.head_dim())
+                            .map(|i| ((i % 7) as f32 - 3.) * scale)
+                            .collect::<Vec<_>>(),
+                        (heads, len, cfg.head_dim()),
+                        &Device::Cpu,
+                    )
+                    .unwrap()
+                };
+                let q = make(cfg.num_attention_heads, qlen);
+                let k = make(cfg.num_key_value_heads, 7);
+                let v = make(cfg.num_key_value_heads, 7);
+                let pages: Vec<_> = (0..7)
+                    .step_by(2)
+                    .map(|start| {
+                        let n = 2.min(7 - start);
+                        (
+                            k.narrow(1, start, n).unwrap().contiguous().unwrap(),
+                            v.narrow(1, start, n).unwrap().contiguous().unwrap(),
+                        )
+                    })
+                    .collect();
+                let expected = attn
+                    .attend(&q, &k, &v)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<f32>()
+                    .unwrap();
+                let actual = attn
+                    .attend_pages(&q, &pages)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<f32>()
+                    .unwrap();
+                assert!(actual
+                    .iter()
+                    .zip(expected)
+                    .all(|(a, b)| a.is_finite() && (a - b).abs() < 0.0001));
+            }
+        }
     }
 }
