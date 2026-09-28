@@ -7,3 +7,5 @@
 /corpus/openai_requests/*
 !/corpus/openai_requests/completion.json
 !/corpus/openai_requests/chat.json
+
+/logs/

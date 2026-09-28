@@ -1,0 +1,46 @@
+name: parser fuzzing
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: parser-fuzz-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [weight_files, openai_requests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+          key: fuzz-${{ matrix.target }}
+      - run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Record toolchain provenance
+        run: |
+          mkdir -p fuzz/logs
+          rustc +nightly -Vv > fuzz/logs/toolchain.txt
+          cargo fuzz --version >> fuzz/logs/toolchain.txt
+      - name: Replay committed seeds and fuzz for five minutes
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=300 -max_len=65536 -timeout=10 -rss_limit_mb=4096 2>&1 | tee fuzz/logs/${{ matrix.target }}.log
+      - name: Preserve crash inputs, logs and evolved corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            fuzz/artifacts/${{ matrix.target }}/
+            fuzz/corpus/${{ matrix.target }}/
+            fuzz/logs/
