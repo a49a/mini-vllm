@@ -64,7 +64,9 @@ def stream_one(host, port, prompt, max_tokens):
         response = conn.getresponse()
         if response.status != 200:
             raise RuntimeError(f'HTTP {response.status}: {response.read()[:200]!r}')
-        return consume_sse(response, start)
+        result = consume_sse(response, start)
+        result["latency"] = time.perf_counter() - start
+        return result
     finally:
         conn.close()
 

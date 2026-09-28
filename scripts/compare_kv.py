@@ -29,8 +29,8 @@ def digest(path):
     return value.hexdigest()
 
 
-def get_json(port, path):
-    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+def get_json(port, path, host="127.0.0.1"):
+    conn = http.client.HTTPConnection(host, port, timeout=2)
     try:
         conn.request('GET', path)
         response = conn.getresponse()
