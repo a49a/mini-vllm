@@ -200,6 +200,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for the full checks and [SECURITY.md](SECURITY.md) for private vulnerability reporting. Parser fuzz targets and reproducible commands are in [fuzz/README.md](fuzz/README.md).
+
 ## Limitations
 
 Educational/experimental quality: single-replica, no auth, no quantization,

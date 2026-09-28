@@ -1,0 +1,28 @@
+name: Bug report / 缺陷报告
+description: Report a reproducible behavior or correctness problem.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "For security-sensitive reports, follow SECURITY.md and do not post exploit details here. / 安全问题请遵循 SECURITY.md。"
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version / 版本
+      placeholder: Git commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction / 复现步骤
+      description: Include the command, model architecture, device, dtype, and a minimal input. Avoid private data and model weights.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior / 预期与实际行为
+    validations:
+      required: true

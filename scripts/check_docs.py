@@ -3,7 +3,8 @@
 import re
 from pathlib import Path
 root = Path(__file__).resolve().parents[1]
-for path in [root / 'README.md', *sorted((root / 'docs').glob('*.md'))]:
+for path in [*(root / name for name in ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'fuzz/README.md']),
+             *sorted((root / 'docs').rglob('*.md'))]:
     text = path.read_text()
     assert text.count('```') % 2 == 0, f'unbalanced fences: {path}'
     for target in re.findall(r'\]\(([^)]+)\)', text):
