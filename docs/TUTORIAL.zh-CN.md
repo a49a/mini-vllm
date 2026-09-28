@@ -336,3 +336,7 @@ benchmark 从终态 usage 读取实际 token 数，要求成功终态与 `[DONE]
 ## 15. Advanced experiments / 进阶实验
 
 继续阅读[进阶运行实验](ADVANCED_RUNTIME.md)：统一默认参数与超时、推导在线 softmax 递推、分析前缀树唯一块所有权、回放 JSONL 调度记录，以及改变请求长度、并发和前缀复用比例。设备测试入口与实际硬件验证结果分别记录。
+
+## 推理效率与调度公平性实验
+
+继续阅读 [推理效率与公平负载实验](inference-efficiency.md)：比较中间 prefill 跳过 logits、GQA 避免 KV 复制，以及 FIFO 与有限插队。练习：提高固定到达率，同时观察尾延迟、失败率和等待队列，解释防饥饿屏障何时会让插队停止。

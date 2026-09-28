@@ -336,3 +336,7 @@ The answers are in sections 4, 6, 8, 9, and 10 respectively. If you can explain 
 ## 15. Advanced experiments / 进阶实验
 
 See [Advanced runtime experiments](ADVANCED_RUNTIME.md): configure defaults and deadlines, derive the online softmax recurrence, inspect deduplicated block-trie ownership, replay JSONL traces, and vary workload length/concurrency/prefix reuse. The measured GPU limitations are listed separately from implemented test entry points.
+
+## Inference efficiency and scheduling fairness
+
+Continue with [inference efficiency and fair-load experiments](inference-efficiency.md): selective prefill logits, grouped attention without KV duplication, and FIFO versus bounded lookahead. Exercise: increase the fixed arrival rate while observing tail latency, failures and queue length; explain when the age barrier stops bypasses.

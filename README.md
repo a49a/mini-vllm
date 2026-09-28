@@ -164,6 +164,8 @@ See [HTTP admission and lifecycle testing](docs/http-lifecycle-validation.md) fo
 
 See [advanced runtime experiments](docs/ADVANCED_RUNTIME.md) for teaching examples, load matrices and device validation.
 
+See [selective logits, grouped attention and fixed-rate load experiments](docs/inference-efficiency.md) for performance comparisons and the optional bounded-lookahead admission policy.
+
 See [service shutdown, preprocessing metrics and pinned reference validation](docs/service-validation.md) for process tests and the scheduled real-model checks.
 
 ## Performance measurement

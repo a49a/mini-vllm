@@ -1,0 +1,132 @@
+{
+  "platform": "macOS-14.8.9-arm64-arm-64bit",
+  "base_revision": "19c78aa0d23ba644947c2fcc8140115df23ef98b",
+  "working_tree": "uncommitted implementation changes; source hashes identify tested code",
+  "commands": [
+    "cargo test --release --locked -p mini-vllm-model paged_attention_timing -- --ignored --nocapture",
+    "cargo run --release --locked -p mini-vllm-model --example selected_logits -- models/qwen2.5-0.5b-instruct"
+  ],
+  "source_sha256": {
+    "crates/mini-vllm-model/src/attention.rs": "7677d93b5f2ff4e05eaed1371d4f5580321346088b6ea3e6b85b0edafcb25d82",
+    "crates/mini-vllm-model/src/qwen2.rs": "44278fec81ed9babd4e966c96f3826ec60ffdbd6971b24c9ae347d10ee8d0549",
+    "crates/mini-vllm-model/examples/selected_logits.rs": "e475d896f2bd703870067b03df186a7fba599480f93358050ea18d90c35351c6",
+    "models/qwen2.5-0.5b-instruct/config.json": "18e18afcaccafade98daf13a54092927904649e1dd4eba8299ab717d5d94ff45"
+  },
+  "attention": [
+    {
+      "context": 256,
+      "query_tokens": 1,
+      "expanded_ms": [
+        0.4758041,
+        0.40898339999999994,
+        0.3832459,
+        0.37161249999999996,
+        0.3708708
+      ],
+      "grouped_ms": [
+        0.3346583,
+        0.3417,
+        0.3009,
+        0.2885833,
+        0.2868792
+      ],
+      "expanded_ms_median": 0.3832459,
+      "grouped_ms_median": 0.3009,
+      "reduction_percent": 21.48643990711968
+    },
+    {
+      "context": 256,
+      "query_tokens": 16,
+      "expanded_ms": [
+        1.3552542,
+        1.2745,
+        1.2761959,
+        1.2961334,
+        1.3284834
+      ],
+      "grouped_ms": [
+        1.0490416,
+        1.055925,
+        1.0640916,
+        1.0437667,
+        1.151675
+      ],
+      "expanded_ms_median": 1.2961334,
+      "grouped_ms_median": 1.055925,
+      "reduction_percent": 18.532691156635572
+    },
+    {
+      "context": 1024,
+      "query_tokens": 1,
+      "expanded_ms": [
+        1.4431375,
+        1.4692667,
+        1.4109083,
+        1.4098209000000002,
+        1.4290125
+      ],
+      "grouped_ms": [
+        1.1733666999999999,
+        1.2046792000000002,
+        1.1961249999999999,
+        1.1161832999999999,
+        1.0948375
+      ],
+      "expanded_ms_median": 1.4290125,
+      "grouped_ms_median": 1.1733666999999999,
+      "reduction_percent": 17.889682560509456
+    },
+    {
+      "context": 1024,
+      "query_tokens": 16,
+      "expanded_ms": [
+        5.3689792,
+        5.366395799999999,
+        5.2515916,
+        5.294325,
+        5.3725666
+      ],
+      "grouped_ms": [
+        4.1315541,
+        4.0913708,
+        4.1364917000000005,
+        4.1792457999999995,
+        4.2229834
+      ],
+      "expanded_ms_median": 5.366395799999999,
+      "grouped_ms_median": 4.1364917000000005,
+      "reduction_percent": 22.918624451815482
+    }
+  ],
+  "selected_logits": {
+    "chunk_tokens": 16,
+    "device": "cpu",
+    "dtype": "f32",
+    "full_projection_rows": 16,
+    "model": "models/qwen2.5-0.5b-instruct",
+    "selected_projection_rows": 1,
+    "tokens": 256,
+    "trials": [
+      {
+        "full_logits_ms": 2801.7389590000002,
+        "max_absolute_error": 0.0,
+        "selected_logits_ms": 2141.105459,
+        "trial": 0
+      },
+      {
+        "full_logits_ms": 2481.067125,
+        "max_absolute_error": 0.0,
+        "selected_logits_ms": 2166.1487500000003,
+        "trial": 1
+      },
+      {
+        "full_logits_ms": 2539.676625,
+        "max_absolute_error": 0.0,
+        "selected_logits_ms": 2148.7615419999997,
+        "trial": 2
+      }
+    ],
+    "warmup_per_mode": 1
+  },
+  "recorded_at_utc": "2026-09-28T16:02:56.566503+00:00"
+}
