@@ -18,6 +18,8 @@ This bounds admitted request bodies (each still limited to 1 MiB) and CPU jobs, 
 
 这里限制的是已准入请求体和 CPU 任务，不是整个服务器的连接数或内存总量。JSON 解析仍在异步任务中执行，受请求体大小和准入数量约束；单次同步 serde 解析不能被计时器强行中断。
 
+See [service validation](service-validation.md) for preprocessing metrics, bounded runtime teardown and real CLI process tests.
+
 ## Consistent errors / 一致的错误响应
 
 Extractor and business errors use `{"error":{"message":"...","type":"..."}}` with `application/json`. HTTP statuses are preserved:

@@ -164,6 +164,8 @@ See [HTTP admission and lifecycle testing](docs/http-lifecycle-validation.md) fo
 
 See [advanced runtime experiments](docs/ADVANCED_RUNTIME.md) for teaching examples, load matrices and device validation.
 
+See [service shutdown, preprocessing metrics and pinned reference validation](docs/service-validation.md) for process tests and the scheduled real-model checks.
+
 ## Performance measurement
 
 See the [three-mode CPU report](docs/benchmarks/online-kv-comparison.md) and [reproduction/device commands](docs/IMPLEMENTATION.md).

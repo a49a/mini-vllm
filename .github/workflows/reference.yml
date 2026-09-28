@@ -1,0 +1,30 @@
+name: pinned reference validation
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 4 * * 2'
+permissions:
+  contents: read
+concurrency:
+  group: reference-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: models/reference-qwen
+          key: reference-model-${{ hashFiles('scripts/reference-model.json') }}
+      - name: Verify pinned files and run both independent oracles
+        run: python3 scripts/validate_reference.py --download --output artifacts/reference-validation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reference-validation-${{ github.run_id }}
+          path: artifacts/reference-validation.json
+          retention-days: 30

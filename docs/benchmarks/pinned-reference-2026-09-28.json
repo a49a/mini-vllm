@@ -1,0 +1,121 @@
+{
+  "recorded_at_utc": "2026-09-28T14:25:44.887460+00:00",
+  "manifest": {
+    "repository": "Qwen/Qwen2.5-0.5B-Instruct",
+    "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+    "files": {
+      "config.json": {
+        "sha256": "18e18afcaccafade98daf13a54092927904649e1dd4eba8299ab717d5d94ff45",
+        "bytes": 659
+      },
+      "generation_config.json": {
+        "sha256": "e558847a8b4402616f1273797b015104dc266fe4b520056fca88823ba8f8ebe6",
+        "bytes": 242
+      },
+      "tokenizer.json": {
+        "sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+        "bytes": 7031645
+      },
+      "tokenizer_config.json": {
+        "sha256": "5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583",
+        "bytes": 7305
+      },
+      "model.safetensors": {
+        "sha256": "fdf756fa7fcbe7404d5c60e26bff1a0c8b8aa1f72ced49e7dd0210fe288fb7fe",
+        "bytes": 988097824
+      }
+    }
+  },
+  "model_directory": "/Users/ada/src/mini-vllm/models/qwen2.5-0.5b-instruct",
+  "verified_files": {
+    "config.json": "18e18afcaccafade98daf13a54092927904649e1dd4eba8299ab717d5d94ff45",
+    "generation_config.json": "e558847a8b4402616f1273797b015104dc266fe4b520056fca88823ba8f8ebe6",
+    "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+    "tokenizer_config.json": "5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583",
+    "model.safetensors": "fdf756fa7fcbe7404d5c60e26bff1a0c8b8aa1f72ced49e7dd0210fe288fb7fe"
+  },
+  "tests": [
+    {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-tokenizer",
+        "--test",
+        "chat_reference",
+        "rendered_token_ids_match_transformers",
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "passed": true,
+      "timed_out": false,
+      "elapsed_seconds": 1.2355641250032932,
+      "output": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s\n     Running tests/chat_reference.rs (target/debug/deps/chat_reference-58e840bb170b9d8f)\n\nrunning 1 test\ntest rendered_token_ids_match_transformers ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s\n\n"
+    },
+    {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-model",
+        "--test",
+        "reference",
+        "hf_real_qwen_logits_match_all_paths",
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "passed": true,
+      "timed_out": false,
+      "elapsed_seconds": 80.0320106659783,
+      "output": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s\n     Running tests/reference.rs (target/debug/deps/reference-27c0556e912c4383)\n\nrunning 1 test\ntest hf_real_qwen_logits_match_all_paths has been running for over 60 seconds\ntest hf_real_qwen_logits_match_all_paths ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 79.73s\n\n"
+    }
+  ],
+  "passed": true,
+  "revision": {
+    "command": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "exit_code": 0,
+    "passed": true,
+    "timed_out": false,
+    "elapsed_seconds": 0.020800875034183264,
+    "output": "1bc08fb0a4314853fef3433981d06d6933794c17\n"
+  },
+  "working_tree": {
+    "command": [
+      "git",
+      "status",
+      "--porcelain"
+    ],
+    "exit_code": 0,
+    "passed": true,
+    "timed_out": false,
+    "elapsed_seconds": 0.01570874999742955,
+    "output": " M Cargo.lock\n M crates/mini-vllm-cli/Cargo.toml\n M crates/mini-vllm-cli/src/main.rs\n M crates/mini-vllm-server/src/api.rs\n M crates/mini-vllm-server/src/lib.rs\n M crates/mini-vllm-server/src/preprocessing.rs\n?? .github/workflows/reference.yml\n?? crates/mini-vllm-cli/src/runtime.rs\n?? crates/mini-vllm-cli/tests/\n?? crates/mini-vllm-server/src/preprocessing_metrics.rs\n?? scripts/reference-model.json\n?? scripts/tests/test_reference_validation.py\n?? scripts/validate_reference.py\n"
+  },
+  "rustc": {
+    "command": [
+      "rustc",
+      "-Vv"
+    ],
+    "exit_code": 0,
+    "passed": true,
+    "timed_out": false,
+    "elapsed_seconds": 0.01927683304529637,
+    "output": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: aarch64-apple-darwin\nrelease: 1.93.1\nLLVM version: 21.1.8\n"
+  },
+  "oracle_sha256": {
+    "crates/mini-vllm-tokenizer/tests/fixtures/chat-reference.json": "201124002071797688fbf6ddf8f29ffe8dcb9fd9bba9c42b343a6c35bb0cca09",
+    "crates/mini-vllm-model/tests/fixtures/qwen2.5-0.5b-reference.json": "d033464ee6c290cb75d3ad47a642da1f554aae2b6e59e744452574be72b0b5bc"
+  }
+}
