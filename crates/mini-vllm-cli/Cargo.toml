@@ -1,0 +1,33 @@
+[package]
+name = "mini-vllm-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "mini-vllm command line interface"
+
+[[bin]]
+name = "mini-vllm"
+path = "src/main.rs"
+
+[features]
+default = []
+cuda = ["mini-vllm-model/cuda"]
+
+[dependencies]
+mini-vllm-core = { workspace = true }
+mini-vllm-model = { workspace = true }
+mini-vllm-tokenizer = { workspace = true }
+mini-vllm-engine = { workspace = true }
+mini-vllm-server = { workspace = true }
+candle-core = { workspace = true }
+axum = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Metal is enabled by default on macOS builds.
+[target.'cfg(target_os = "macos")'.dependencies]
+mini-vllm-model = { workspace = true, features = ["metal"] }
