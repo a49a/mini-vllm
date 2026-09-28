@@ -1,0 +1,181 @@
+{
+  "platform": "macOS-14.8.9-arm64-arm-64bit",
+  "results": [
+    {
+      "device": "cpu",
+      "dtype": "f32",
+      "test": "backend_dtype_reference",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-model",
+        "--test",
+        "reference",
+        "backend_dtype_reference",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "passed": true,
+      "exit_code": 0,
+      "output": "   Compiling mini-vllm-kv v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-kv)\n   Compiling mini-vllm-model v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-model)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.10s\n     Running tests/reference.rs (target/debug/deps/reference-27c0556e912c4383)\n\nrunning 1 test\ntest backend_dtype_reference ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.03s\n\n"
+    },
+    {
+      "device": "cpu",
+      "dtype": "f32",
+      "test": "backend_dtype_lifecycle",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-engine",
+        "--test",
+        "engine",
+        "backend_dtype_lifecycle",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "passed": true,
+      "exit_code": 0,
+      "output": "   Compiling mini-vllm-model v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-model)\n   Compiling mini-vllm-engine v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-engine)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.10s\n     Running tests/engine.rs (target/debug/deps/engine-6727550990a7a5d1)\n\nrunning 1 test\ntest backend_dtype_lifecycle ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.10s\n\n"
+    },
+    {
+      "device": "cpu",
+      "dtype": "f16",
+      "test": "backend_dtype_reference",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-model",
+        "--test",
+        "reference",
+        "backend_dtype_reference",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "passed": true,
+      "exit_code": 0,
+      "output": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s\n     Running tests/reference.rs (target/debug/deps/reference-27c0556e912c4383)\n\nrunning 1 test\ntest backend_dtype_reference ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.02s\n\n"
+    },
+    {
+      "device": "cpu",
+      "dtype": "f16",
+      "test": "backend_dtype_lifecycle",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-engine",
+        "--test",
+        "engine",
+        "backend_dtype_lifecycle",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "passed": true,
+      "exit_code": 0,
+      "output": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s\n     Running tests/engine.rs (target/debug/deps/engine-6727550990a7a5d1)\n\nrunning 1 test\ntest backend_dtype_lifecycle ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.10s\n\n"
+    },
+    {
+      "device": "metal",
+      "dtype": "f32",
+      "test": "backend_dtype_reference",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-model",
+        "--test",
+        "reference",
+        "backend_dtype_reference",
+        "--features",
+        "metal",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "passed": false,
+      "exit_code": 101,
+      "output": "   Compiling mini-vllm-kv v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-kv)\n   Compiling mini-vllm-model v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-model)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.82s\n     Running tests/reference.rs (target/debug/deps/reference-b8ff762fd08d12c5)\n\nrunning 1 test\n\nthread 'backend_dtype_reference' (11882033) panicked at crates/mini-vllm-model/tests/reference.rs:165:62:\ncalled `Result::unwrap()` on an `Err` value: UnsupportedDevice(\"metal (no Metal device visible to this process, or not built with the `metal` feature)\")\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest backend_dtype_reference ... FAILED\n\nfailures:\n\nfailures:\n    backend_dtype_reference\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.36s\n\nerror: test failed, to rerun pass `-p mini-vllm-model --test reference`\n"
+    },
+    {
+      "device": "metal",
+      "dtype": "f32",
+      "test": "backend_dtype_lifecycle",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-engine",
+        "--test",
+        "engine",
+        "backend_dtype_lifecycle",
+        "--features",
+        "mini-vllm-model/metal",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "passed": false,
+      "exit_code": 101,
+      "output": "   Compiling mini-vllm-kv v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-kv)\n   Compiling mini-vllm-tokenizer v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-tokenizer)\n   Compiling mini-vllm-model v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-model)\n   Compiling mini-vllm-engine v0.1.0 (/Users/ada/src/mini-vllm/crates/mini-vllm-engine)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.70s\n     Running tests/engine.rs (target/debug/deps/engine-ef07ff3e38891f7d)\n\nrunning 1 test\n\nthread 'backend_dtype_lifecycle' (11882820) panicked at crates/mini-vllm-engine/tests/engine.rs:671:6:\ncalled `Result::unwrap()` on an `Err` value: UnsupportedDevice(\"metal (no Metal device visible to this process, or not built with the `metal` feature)\")\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest backend_dtype_lifecycle ... FAILED\n\nfailures:\n\nfailures:\n    backend_dtype_lifecycle\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.36s\n\nerror: test failed, to rerun pass `-p mini-vllm-engine --test engine`\n"
+    },
+    {
+      "device": "metal",
+      "dtype": "f16",
+      "test": "backend_dtype_reference",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-model",
+        "--test",
+        "reference",
+        "backend_dtype_reference",
+        "--features",
+        "metal",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "passed": false,
+      "exit_code": 101,
+      "output": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s\n     Running tests/reference.rs (target/debug/deps/reference-b8ff762fd08d12c5)\n\nrunning 1 test\n\nthread 'backend_dtype_reference' (11882876) panicked at crates/mini-vllm-model/tests/reference.rs:165:62:\ncalled `Result::unwrap()` on an `Err` value: UnsupportedDevice(\"metal (no Metal device visible to this process, or not built with the `metal` feature)\")\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest backend_dtype_reference ... FAILED\n\nfailures:\n\nfailures:\n    backend_dtype_reference\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.35s\n\nerror: test failed, to rerun pass `-p mini-vllm-model --test reference`\n"
+    },
+    {
+      "device": "metal",
+      "dtype": "f16",
+      "test": "backend_dtype_lifecycle",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "mini-vllm-engine",
+        "--test",
+        "engine",
+        "backend_dtype_lifecycle",
+        "--features",
+        "mini-vllm-model/metal",
+        "--",
+        "--ignored",
+        "--nocapture"
+      ],
+      "passed": false,
+      "exit_code": 101,
+      "output": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.39s\n     Running tests/engine.rs (target/debug/deps/engine-ef07ff3e38891f7d)\n\nrunning 1 test\n\nthread 'backend_dtype_lifecycle' (11882929) panicked at crates/mini-vllm-engine/tests/engine.rs:671:6:\ncalled `Result::unwrap()` on an `Err` value: UnsupportedDevice(\"metal (no Metal device visible to this process, or not built with the `metal` feature)\")\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest backend_dtype_lifecycle ... FAILED\n\nfailures:\n\nfailures:\n    backend_dtype_lifecycle\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.35s\n\nerror: test failed, to rerun pass `-p mini-vllm-engine --test engine`\n"
+    }
+  ]
+}

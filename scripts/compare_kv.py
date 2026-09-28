@@ -17,6 +17,7 @@ import statistics
 import subprocess
 import threading
 import time
+import uuid
 
 from benchmark import stream_one
 
@@ -55,6 +56,10 @@ def trial(args, mode, index, output):
         command += ['--contiguous-kv']
     if mode == 'prefix':
         command += ['--prefix-cache-tokens', '256']
+    trace_path = None
+    if args.trace:
+        trace_path = output.parent / f'{output.stem}-{mode}-{index}-{uuid.uuid4().hex[:8]}.jsonl'
+        command += ['--trace-jsonl', str(trace_path.resolve())]
     log_path = output.parent / f'{output.stem}-{mode}-{index}.log'
     samples, stop = [], threading.Event()
     with log_path.open('w') as log:
@@ -105,6 +110,8 @@ def trial(args, mode, index, output):
                     'kv_storage_allocations': after['kv_storage_allocations_total'] - before['kv_storage_allocations_total'],
                     'computed_prompt_tokens': after['prompt_tokens_total'] - before['prompt_tokens_total'],
                     'prefix_hit_tokens': after['prefix_cache_hit_tokens'] - before['prefix_cache_hit_tokens'],
+                    'trace_events_dropped': after['trace_events_dropped'] - before['trace_events_dropped'],
+                    'trace_path': str(trace_path) if trace_path else None,
                     'metrics_after': after}
         finally:
             process.terminate()
@@ -129,18 +136,25 @@ def main():
     parser.add_argument('--concurrency', type=int, default=2)
     parser.add_argument('--max-tokens', type=int, default=16)
     parser.add_argument('--trials', type=int, default=3)
+    parser.add_argument('--modes', nargs='+', choices=['contiguous', 'paged', 'prefix'],
+                        default=['contiguous', 'paged', 'prefix'])
+    parser.add_argument('--trace', action='store_true', help='record an opt-in JSONL trace during measured requests')
+    parser.add_argument('--prompt-repeat', type=int, default=1,
+                        help='repeat the prompt to create a deeper cached prefix')
     parser.add_argument('--prompt', default='Explain what a KV cache is, how it stores keys and values, and why prefix sharing reduces repeated work.')
     parser.add_argument('--output', default='artifacts/kv-comparison.json')
     args = parser.parse_args()
-    if min(args.requests, args.concurrency, args.max_tokens, args.trials) < 1:
+    if min(args.requests, args.concurrency, args.max_tokens, args.trials, args.prompt_repeat) < 1:
         parser.error('counts must be positive')
+    args.prompt = ' '.join([args.prompt] * args.prompt_repeat)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     report = {'platform': platform.platform(), 'settings': vars(args), 'rss_scope': 'process including load and warmup; excludes dedicated device VRAM', 'trials': [], 'binary_sha256': digest(args.binary), 'model_config_sha256': digest(Path(args.model) / 'config.json'), 'python_version': platform.python_version()}
     for index in range(args.trials):
-        modes = ['contiguous', 'paged', 'prefix']
+        modes = args.modes.copy()
         # Rotate order to reduce systematic cold/thermal ordering bias.
-        modes = modes[index % 3:] + modes[:index % 3]
+        rotation = index % len(modes)
+        modes = modes[rotation:] + modes[:rotation]
         for mode in modes:
             row = trial(args, mode, index, output)
             report['trials'].append(row)
@@ -149,12 +163,12 @@ def main():
     lines = ['# KV comparison / KV 对照实验', '',
              f'Platform: `{report["platform"]}`. Device: {args.device}; dtype: {args.dtype}.', '',
              'Warmup excluded from timing/allocations. RSS includes model loading and warmup; it is not VRAM. Allocation counts include persistent KV tensors only. Small samples are smoke measurements, not capacity claims.', '',
-             '| Mode | Trial | Success | tok/s | TTFT median ms | Peak RSS MiB | KV allocations | Computed prompt tokens | Prefix hits |',
-             '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
+             '| Mode | Trace | Trial | Success | tok/s | TTFT median ms | Peak RSS MiB | KV allocations | Computed prompt tokens | Prefix hits | Trace drops |',
+             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for row in report['trials']:
         ttft = row['ttft_ms_median']
         rss = row['peak_process_rss_bytes']
-        lines.append(f'| {row["mode"]} | {row["trial"]} | {row["successful"]}/{args.requests} | {row["tokens_per_second"]:.2f} | {round(ttft, 2) if ttft is not None else "n/a"} | {round(rss / 2**20, 2) if rss else "n/a"} | {row["kv_storage_allocations"]} | {row["computed_prompt_tokens"]} | {row["prefix_hit_tokens"]} |')
+        lines.append(f'| {row["mode"]} | {"on" if args.trace else "off"} | {row["trial"]} | {row["successful"]}/{args.requests} | {row["tokens_per_second"]:.2f} | {round(ttft, 2) if ttft is not None else "n/a"} | {round(rss / 2**20, 2) if rss else "n/a"} | {row["kv_storage_allocations"]} | {row["computed_prompt_tokens"]} | {row["prefix_hit_tokens"]} | {row["trace_events_dropped"]} |')
     output.with_suffix('.md').write_text('\n'.join(lines) + '\n')
     return 1 if any(row['failures'] for row in report['trials']) else 0
 

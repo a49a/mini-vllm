@@ -101,4 +101,6 @@ The load matrix alternates short/long prompts and output limits, varies concurre
 
 ## Validation / 验收记录
 
-131 regular Rust tests and 5 Python tests pass; fmt, clippy and documentation checks pass. Additional real Qwen CPU/F32 alignment, CPU/F32 and CPU/F16 backend numerical/lifecycle/stress runs pass. Real HTTP smoke confirms configured defaults, deadline 504 with KV reclamation, JSONL generation and clean shutdown. Browser visual QA and successful GPU execution remain unverified for the environmental reasons above.
+137 regular Rust tests and 5 Python tests pass; fmt, clippy and documentation checks pass. Additional real Qwen CPU/F32 alignment, CPU/F32 and CPU/F16 backend numerical/lifecycle/stress runs pass. Real HTTP smoke confirms configured defaults, deadline 504 with KV reclamation, JSONL generation and clean shutdown. Browser visual QA and successful GPU execution remain unverified for the environmental reasons above.
+
+The follow-up [long-prefix/trace report](benchmarks/prefix-trace-2026-09-28.md) records 16 successful measured requests, 97.7% prompt-token reuse, and zero trace drops. It also records the latest CPU passes and Metal initialization failures. Parser fuzz targets are documented in [fuzz/README.md](../fuzz/README.md). On 2026-09-28, both targets completed 2,000 libFuzzer runs with AddressSanitizer and no crash (cargo-fuzz 0.13.2, Rust 1.101.0-nightly; seeds 1366339630 for weight files and 1397009862 for requests, max input length 4096). These are smoke runs, not exhaustive validation.
