@@ -1,0 +1,3 @@
+# Use an isolated Python environment; torch is a separate platform dependency.
+transformers==4.46.3
+safetensors==0.4.5
