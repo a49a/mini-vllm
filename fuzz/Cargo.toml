@@ -1,0 +1,30 @@
+[package]
+name = "mini-vllm-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mini-vllm-model = { path = "../crates/mini-vllm-model" }
+mini-vllm-server = { path = "../crates/mini-vllm-server" }
+serde_json = "1"
+
+[[bin]]
+name = "weight_files"
+path = "fuzz_targets/weight_files.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "openai_requests"
+path = "fuzz_targets/openai_requests.rs"
+test = false
+doc = false
+bench = false

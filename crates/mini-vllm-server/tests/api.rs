@@ -102,6 +102,51 @@ async fn post_json(uri: &str, body: String) -> axum::http::Response<Body> {
 }
 
 #[tokio::test]
+async fn malformed_json_never_returns_a_server_error() {
+    let (state, _) = state();
+    let app = routes::router(state);
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    for case in 0..256 {
+        let mut body = vec![0u8; case % 193 + 1];
+        for byte in &mut body {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            *byte = seed as u8;
+        }
+        for uri in ["/v1/completions", "/v1/chat/completions"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert!(
+                !response.status().is_server_error(),
+                "case {case} returned {}",
+                response.status()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn body_above_one_megabyte_is_rejected() {
+    let response = post_json(
+        "/v1/completions",
+        format!("{{\"prompt\":\"{}\"}}", "x".repeat(1_048_576)),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
 async fn health_and_models() {
     let (state, _) = state();
     let app = routes::router(state);

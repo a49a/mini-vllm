@@ -474,4 +474,23 @@ mod tests {
             matches!(validate_qwen2_shapes(&cfg, &headers), Err(Error::Config(message)) if message.contains("model.embed_tokens.weight"))
         );
     }
+
+    #[test]
+    fn malformed_headers_are_rejected_without_panicking() {
+        let dir = temp_dir();
+        let path = dir.join("model.safetensors");
+        let mut seed = 0x517c_c1b7_2722_0a95u64;
+        for len in 0..256 {
+            let mut bytes = vec![0u8; len];
+            for byte in &mut bytes {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                *byte = seed as u8;
+            }
+            std::fs::write(&path, bytes).unwrap();
+            assert!(read_headers(std::slice::from_ref(&path)).is_err());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

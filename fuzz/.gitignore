@@ -1,0 +1,9 @@
+/target/
+/artifacts/
+/coverage/
+/corpus/weight_files/*
+!/corpus/weight_files/single_valid
+!/corpus/weight_files/index_traversal
+/corpus/openai_requests/*
+!/corpus/openai_requests/completion.json
+!/corpus/openai_requests/chat.json

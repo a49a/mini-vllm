@@ -5,7 +5,7 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, SyncSender, TrySendError},
+        mpsc::{self, Receiver, SyncSender, TrySendError},
         Arc,
     },
     thread::JoinHandle,
@@ -37,20 +37,8 @@ impl TraceWriter {
                 .name("mini-vllm-trace".into())
                 .spawn(move || {
                     let mut file = BufWriter::new(file);
-                    for event in receiver {
-                        if let Err(error) = write_event(&mut file, &event) {
-                            tracing::warn!(%error, "teaching trace writer stopped after write failure");
-                            return;
-                        }
-                    }
-                    let count = dropped_for_worker.load(Ordering::Relaxed);
-                    if count > 0 {
-                        if let Err(error) = write_event(&mut file, &serde_json::json!({"event":"trace_dropped","count":count,"schema_version":1})) {
-                            tracing::warn!(%error, "could not write dropped trace count");
-                        }
-                    }
-                    if let Err(error) = file.flush() {
-                        tracing::warn!(%error, "could not flush teaching trace");
+                    if let Err(error) = drain_trace(&mut file, receiver, &dropped_for_worker) {
+                        tracing::warn!(%error, "teaching trace writer stopped after write failure");
                     }
                 })?;
             (Some(sender), Some(worker))
@@ -102,12 +90,27 @@ impl Drop for TraceWriter {
     }
 }
 
-fn write_event(
-    file: &mut BufWriter<std::fs::File>,
-    event: &serde_json::Value,
-) -> std::io::Result<()> {
+fn write_event(file: &mut impl Write, event: &serde_json::Value) -> std::io::Result<()> {
     serde_json::to_writer(&mut *file, event).map_err(std::io::Error::other)?;
     file.write_all(b"\n")
+}
+
+fn drain_trace(
+    file: &mut impl Write,
+    receiver: Receiver<serde_json::Value>,
+    dropped: &AtomicU64,
+) -> std::io::Result<()> {
+    for event in receiver {
+        write_event(file, &event)?;
+    }
+    let count = dropped.load(Ordering::Relaxed);
+    if count > 0 {
+        write_event(
+            file,
+            &serde_json::json!({"event":"trace_dropped","count":count,"schema_version":1}),
+        )?;
+    }
+    file.flush()
 }
 
 #[cfg(test)]
@@ -158,5 +161,43 @@ mod tests {
         trace.emit(|| serde_json::json!({"event":"second"}));
         assert_eq!(trace.dropped_count(), 1);
         assert_eq!(receiver.try_recv().unwrap()["event"], "first");
+    }
+
+    #[test]
+    fn drain_flushes_events_and_dropped_count() {
+        let (sender, receiver) = mpsc::sync_channel(2);
+        sender.send(serde_json::json!({"event":"first"})).unwrap();
+        drop(sender);
+        let dropped = AtomicU64::new(3);
+        let mut bytes = Vec::new();
+        drain_trace(&mut bytes, receiver, &dropped).unwrap();
+        let lines: Vec<serde_json::Value> = bytes
+            .split(|b| *b == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["event"], "first");
+        assert_eq!(lines[1]["event"], "trace_dropped");
+        assert_eq!(lines[1]["count"], 3);
+    }
+
+    #[test]
+    fn write_failure_closes_the_receiver() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("disk unavailable"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender.send(serde_json::json!({"event":"first"})).unwrap();
+        assert!(drain_trace(&mut Broken, receiver, &AtomicU64::new(0)).is_err());
+        assert!(sender
+            .try_send(serde_json::json!({"event":"second"}))
+            .is_err());
     }
 }

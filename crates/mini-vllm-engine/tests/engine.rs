@@ -65,6 +65,50 @@ fn req(id: &str, prompt: Vec<u32>, max_new: usize) -> GenerationRequest {
     }
 }
 
+#[tokio::test]
+async fn shutdown_drains_trace_through_request_retirement() {
+    let path = std::env::temp_dir().join(format!(
+        "mini-vllm-engine-trace-{}-{}.jsonl",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut cfg = config();
+    cfg.trace_jsonl = Some(path.clone());
+    let handle = spawn_engine(no_eos_model(), None, cfg, 42).unwrap();
+    let (_, reason, _) = drain(
+        handle
+            .generate(req("trace-shutdown", vec![1, 2, 3], 2))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(reason, FinishReason::Length);
+    handle.request_shutdown(
+        mini_vllm_engine::ShutdownMode::Drain,
+        Duration::from_secs(5),
+    );
+    tokio::task::spawn_blocking(move || handle.join(Duration::from_secs(5)))
+        .await
+        .unwrap()
+        .unwrap();
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for expected in ["admitted", "scheduled", "computed", "retired"] {
+        assert!(
+            events
+                .iter()
+                .any(|e| e["event"] == expected && e["request_id"] == "trace-shutdown"),
+            "missing {expected}"
+        );
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
 /// Drain the stream to its terminal event.
 async fn drain(
     rx: tokio::sync::mpsc::Receiver<GenerationEvent>,
