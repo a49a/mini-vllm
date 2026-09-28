@@ -4,6 +4,7 @@
 //! engine (including batching and cancellation) is covered by the engine
 //! crate's tests.
 
+use std::future::Future;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -690,4 +691,116 @@ async fn engine_deadline_maps_to_gateway_timeout() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+}
+
+#[tokio::test]
+async fn extractor_errors_have_the_same_json_envelope_for_both_endpoints() {
+    for uri in ["/v1/completions", "/v1/chat/completions"] {
+        let valid = if uri.contains("chat") {
+            serde_json::json!({"messages":[{"role":"user","content":"a"}],"unknown":1})
+        } else {
+            serde_json::json!({"prompt":"a","unknown":1})
+        };
+        for (body, content_type, status) in [
+            (
+                "{".into(),
+                Some("application/json"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "{}".into(),
+                Some("application/json"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                valid.to_string(),
+                Some("application/json"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "{}".into(),
+                Some("text/plain"),
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ),
+            ("{}".into(), None, StatusCode::UNSUPPORTED_MEDIA_TYPE),
+            (
+                format!("{{\"prompt\":\"{}\"}}", "x".repeat(1_048_576)),
+                Some("application/json"),
+                StatusCode::PAYLOAD_TOO_LARGE,
+            ),
+        ] {
+            let (state, _) = state();
+            let mut builder = Request::builder().method("POST").uri(uri);
+            if let Some(header) = content_type {
+                builder = builder.header("content-type", header);
+            }
+            let response = routes::router(state)
+                .oneshot(builder.body(Body::from(body)).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status);
+            assert_eq!(response.headers()["content-type"], "application/json");
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["error"]["type"], "invalid_request_error");
+            assert!(!value["error"]["message"].as_str().unwrap().is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn slow_body_consumes_bounded_admission_but_health_stays_responsive() {
+    use mini_vllm_server::preprocessing::PreprocessConfig;
+    let (state, _) = state();
+    let app = routes::router_with_preprocessing(
+        state,
+        PreprocessConfig {
+            workers: 1,
+            waiting: 0,
+            timeout: Duration::from_millis(100),
+        },
+    )
+    .unwrap();
+    let (body_tx, body_rx) = tokio::sync::mpsc::channel::<Result<String, std::io::Error>>(1);
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/completions")
+        .header("content-type", "application/json")
+        .body(Body::from_stream(
+            tokio_stream::wrappers::ReceiverStream::new(body_rx),
+        ))
+        .unwrap();
+    // Poll the request once: it takes admission and waits for the first body byte.
+    let mut pending = Box::pin(app.clone().oneshot(request));
+    assert!(matches!(
+        std::future::poll_fn(|cx| std::task::Poll::Ready(pending.as_mut().poll(cx))).await,
+        std::task::Poll::Pending
+    ));
+    let health = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/completions")
+                .header("content-type", "application/json")
+                .body(Body::from("{\"prompt\":\"a\"}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(pending.await.unwrap().status(), StatusCode::REQUEST_TIMEOUT);
+    drop(body_tx);
 }

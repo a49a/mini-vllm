@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod openai;
+pub mod preprocessing;
 pub mod routes;
 pub mod streaming;
 

@@ -5,7 +5,8 @@
 // concrete type.
 #![allow(clippy::result_large_err)]
 
-use axum::extract::{Json, State};
+use crate::preprocessing::Input;
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json as JsonResponse, Response};
 use mini_vllm_core::{FinishReason, GenerationEvent, GenerationRequest, SamplingParams, Usage};
@@ -19,7 +20,11 @@ use crate::openai::{
 use crate::streaming::{self, DisconnectGuard};
 use crate::SharedState;
 
-fn api_error(status: StatusCode, message: impl Into<String>, kind: &'static str) -> Response {
+pub(crate) fn api_error(
+    status: StatusCode,
+    message: impl Into<String>,
+    kind: &'static str,
+) -> Response {
     (status, JsonResponse(error_body(message, kind))).into_response()
 }
 
@@ -181,7 +186,7 @@ async fn collect(
 
 pub async fn completions(
     State(state): State<SharedState>,
-    Json(req): Json<CompletionRequest>,
+    Input(req, ticket): Input<CompletionRequest>,
 ) -> Response {
     if req
         .model
@@ -208,9 +213,17 @@ pub async fn completions(
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    let prompt_token_ids = match state.tokenizer.encode(&req.prompt, true) {
+    let tokenizer = state.tokenizer.clone();
+    let prompt_token_ids = match ticket
+        .run(move || {
+            tokenizer
+                .encode(&req.prompt, true)
+                .map_err(|e| format!("tokenization failed: {e}"))
+        })
+        .await
+    {
         Ok(ids) => ids,
-        Err(e) => return bad_request(format!("tokenization failed: {e}")),
+        Err(response) => return response,
     };
     let (request_id, events) = match submit(&state, prompt_token_ids, sampling) {
         Ok(v) => v,
@@ -245,7 +258,7 @@ pub async fn completions(
 
 pub async fn chat_completions(
     State(state): State<SharedState>,
-    Json(req): Json<ChatCompletionRequest>,
+    Input(req, ticket): Input<ChatCompletionRequest>,
 ) -> Response {
     if req
         .model
@@ -272,19 +285,24 @@ pub async fn chat_completions(
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    let messages: Vec<ChatMessage> = req
-        .messages
-        .iter()
-        .map(|m: &ChatMessageIn| ChatMessage::new(m.role.clone(), m.content.clone()))
-        .collect();
-    let prompt = match state.template.render(&messages) {
-        Ok(p) => p,
-        Err(e) => return bad_request(e.to_string()),
-    };
-    // Rendered templates embed their own special tokens.
-    let prompt_token_ids = match state.tokenizer.encode(&prompt, false) {
+    let tokenizer = state.tokenizer.clone();
+    let template = state.template.clone();
+    let prompt_token_ids = match ticket
+        .run(move || {
+            let messages: Vec<ChatMessage> = req
+                .messages
+                .into_iter()
+                .map(|m: ChatMessageIn| ChatMessage::new(m.role, m.content))
+                .collect();
+            let prompt = template.render(&messages).map_err(|e| e.to_string())?;
+            tokenizer
+                .encode(&prompt, false)
+                .map_err(|e| format!("tokenization failed: {e}"))
+        })
+        .await
+    {
         Ok(ids) => ids,
-        Err(e) => return bad_request(format!("tokenization failed: {e}")),
+        Err(response) => return response,
     };
     let (request_id, events) = match submit(&state, prompt_token_ids, sampling) {
         Ok(v) => v,

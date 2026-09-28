@@ -98,6 +98,15 @@ enum Command {
         request_timeout_ms: u64,
         #[arg(long, default_value_t = 30)]
         shutdown_timeout_secs: u64,
+        /// Concurrent CPU tokenization/template jobs.
+        #[arg(long, default_value_t = 2)]
+        preprocessing_workers: usize,
+        /// Additional requests admitted before body read/tokenization.
+        #[arg(long, default_value_t = 16)]
+        preprocessing_waiting: usize,
+        /// Total body-read, preprocessing queue and CPU-result budget.
+        #[arg(long, default_value_t = 10000)]
+        preprocessing_timeout_ms: u64,
         /// Total KV budget in tokens.
         #[arg(long, default_value_t = 32768)]
         max_kv_tokens: usize,
@@ -287,6 +296,9 @@ fn cmd_serve(args: Command) -> Result<()> {
         queue_timeout_ms,
         request_timeout_ms,
         shutdown_timeout_secs,
+        preprocessing_workers,
+        preprocessing_waiting,
+        preprocessing_timeout_ms,
         max_kv_tokens,
         max_waiting_requests,
         output_drain_timeout_ms,
@@ -301,6 +313,13 @@ fn cmd_serve(args: Command) -> Result<()> {
     };
     init_tracing(&log_level);
 
+    let preprocessing_config = mini_vllm_server::preprocessing::PreprocessConfig {
+        workers: preprocessing_workers,
+        waiting: preprocessing_waiting,
+        timeout: std::time::Duration::from_millis(preprocessing_timeout_ms),
+    };
+    mini_vllm_server::preprocessing::Preprocessor::new(preprocessing_config)
+        .map_err(anyhow::Error::msg)?;
     let (dev, dt) = resolve(&device, &dtype)?;
     let tokenizer = Arc::new(load_tokenizer_or_die(&model)?);
     let template = Arc::new(ModelChatTemplate::from_model_dir(&model)?);
@@ -350,7 +369,8 @@ fn cmd_serve(args: Command) -> Result<()> {
 
     let runtime = tokio::runtime::Runtime::new().context("building tokio runtime")?;
     runtime.block_on(async move {
-        let app = mini_vllm_server::routes::router(state);
+        let app = mini_vllm_server::routes::router_with_preprocessing(state, preprocessing_config)
+            .map_err(anyhow::Error::msg)?;
         let addr: SocketAddr = format!("{host}:{port}")
             .parse()
             .context("parsing host:port")?;
