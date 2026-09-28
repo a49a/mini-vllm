@@ -87,6 +87,12 @@ enum Command {
         max_batch_tokens: usize,
         #[arg(long, default_value_t = 256)]
         max_prefill_chunk_tokens: usize,
+        /// Candidates considered for admission; 1 is strict FIFO.
+        #[arg(long, default_value_t = 1)]
+        admission_lookahead: usize,
+        /// Block further bypasses once a request has waited this long.
+        #[arg(long, default_value_t = 1000)]
+        admission_max_wait_ms: u64,
         /// Log batch membership, positions and page changes for teaching.
         #[arg(long)]
         trace_request: bool,
@@ -292,6 +298,8 @@ fn cmd_serve(args: Command) -> Result<()> {
         max_num_seqs,
         max_batch_tokens,
         max_prefill_chunk_tokens,
+        admission_lookahead,
+        admission_max_wait_ms,
         trace_request,
         trace_jsonl,
         default_max_new_tokens,
@@ -340,6 +348,8 @@ fn cmd_serve(args: Command) -> Result<()> {
         max_num_seqs,
         max_batch_tokens,
         max_prefill_chunk_tokens,
+        admission_lookahead,
+        admission_max_wait_ms,
         trace_requests: trace_request,
         trace_jsonl,
         default_max_new_tokens,

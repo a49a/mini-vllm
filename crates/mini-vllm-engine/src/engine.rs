@@ -577,18 +577,22 @@ impl Engine {
         let block_size = self.blocks.block_size();
         let admitted = {
             let mut available = self.blocks.free_block_count();
-            self.scheduler.admit(|req| {
-                let shared = self.prefix_cache.matched_tokens(&req.prompt_token_ids);
-                let needed = blocks_for_tokens(
-                    req.prompt_token_ids.len() + req.max_new_tokens - shared,
-                    block_size,
-                );
-                if needed > available {
-                    return false;
-                }
-                available -= needed;
-                true
-            })
+            self.scheduler.admit_with_lookahead(
+                self.config.admission_lookahead,
+                std::time::Duration::from_millis(self.config.admission_max_wait_ms),
+                |req| {
+                    let shared = self.prefix_cache.matched_tokens(&req.prompt_token_ids);
+                    let needed = blocks_for_tokens(
+                        req.prompt_token_ids.len() + req.max_new_tokens - shared,
+                        block_size,
+                    );
+                    if needed > available {
+                        return false;
+                    }
+                    available -= needed;
+                    true
+                },
+            )
         };
         if admitted == 0 {
             return;
@@ -1079,6 +1083,40 @@ mod tests {
             assert!(finished);
         }
         assert_eq!(engine.blocks.free_block_count(), 1);
+    }
+
+    #[test]
+    fn lookahead_admission_keeps_kv_reservations_bounded() {
+        let mut engine = test_engine(EngineConfig {
+            max_kv_tokens: 16,
+            kv_block_size: 4,
+            admission_lookahead: 3,
+            admission_max_wait_ms: 10_000,
+            ..EngineConfig::default()
+        });
+        let _active = enqueue(&mut engine, "active", vec![4], 7);
+        engine.admit_waiting();
+        let _big = enqueue(&mut engine, "big", vec![4], 11);
+        let _small = enqueue(&mut engine, "small", vec![4], 3);
+        let _small2 = enqueue(&mut engine, "small2", vec![4], 3);
+        engine.admit_waiting();
+        assert_eq!(engine.scheduler.running_len(), 3);
+        assert_eq!(engine.scheduler.waiting_len(), 1);
+        assert_eq!(engine.blocks.free_block_count(), 0);
+        assert!(engine
+            .scheduler
+            .running()
+            .iter()
+            .all(|s| s.request.id != "big"));
+        for id in ["active", "small", "small2"] {
+            engine.scheduler.cancel(id);
+        }
+        for _ in 0..20 {
+            engine.step();
+        }
+        assert_eq!(engine.scheduler.waiting_len(), 0);
+        assert_eq!(engine.scheduler.running_len(), 0);
+        assert_eq!(engine.blocks.free_block_count(), 4);
     }
 
     #[test]

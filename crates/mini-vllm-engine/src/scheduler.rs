@@ -63,20 +63,33 @@ impl Scheduler {
         &mut self,
         mut gate: impl FnMut(&mini_vllm_core::GenerationRequest) -> bool,
     ) -> usize {
+        self.admit_with_lookahead(1, std::time::Duration::ZERO, &mut gate)
+    }
+
+    /// Scan at most `lookahead` candidates per admission. A blocked, aged
+    /// request forms a barrier: later requests cannot keep taking its capacity.
+    /// `gate` must consume capacity only when returning true.
+    pub fn admit_with_lookahead(
+        &mut self,
+        lookahead: usize,
+        max_wait: std::time::Duration,
+        mut gate: impl FnMut(&mini_vllm_core::GenerationRequest) -> bool,
+    ) -> usize {
         let mut admitted = 0;
-        loop {
-            if self.running.len() >= self.max_num_seqs {
-                break;
+        while self.running.len() < self.max_num_seqs {
+            let mut candidate = None;
+            for (i, seq) in self.waiting.iter().take(lookahead.max(1)).enumerate() {
+                if gate(&seq.request) {
+                    candidate = Some(i);
+                    break;
+                }
+                if seq.created_at.elapsed() >= max_wait {
+                    break;
+                }
             }
-            let gate_ok = self.waiting.front().is_some_and(|s| gate(&s.request));
-            if !gate_ok {
-                break;
-            }
-            let mut seq = self
-                .waiting
-                .pop_front()
-                .expect("front was just checked to exist");
-            tracing::debug!(request_id = %seq.request.id, "request admitted to running set");
+            let Some(index) = candidate else { break };
+            let mut seq = self.waiting.remove(index).expect("candidate exists");
+            tracing::debug!(request_id = %seq.request.id, bypassed = index, "request admitted to running set");
             seq.status = SequenceStatus::Prefill;
             seq.admitted_at = Some(std::time::Instant::now());
             self.running.push(seq);
@@ -259,6 +272,52 @@ mod tests {
         assert_eq!(n, 1);
         let n = s.admit(|_| false);
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn lookahead_is_bounded_and_aged_requests_stop_bypasses() {
+        use std::time::{Duration, Instant};
+        let mut s = Scheduler::new(8, 512);
+        for id in ["big", "medium", "small"] {
+            s.enqueue(seq(id));
+        }
+        let wait = Duration::from_secs(10);
+        assert_eq!(s.admit_with_lookahead(2, wait, |r| r.id == "small"), 0);
+        assert_eq!(s.admit_with_lookahead(3, wait, |r| r.id == "small"), 1);
+        assert_eq!(s.running()[0].request.id, "small");
+        s.waiting[0].created_at = Instant::now() - wait;
+        let mut probed = Vec::new();
+        assert_eq!(
+            s.admit_with_lookahead(3, wait, |r| {
+                probed.push(r.id.clone());
+                r.id != "big"
+            }),
+            0
+        );
+        assert_eq!(probed, ["big"]);
+        // Once capacity is free the oldest request can proceed.
+        assert_eq!(s.admit_with_lookahead(3, wait, |_| true), 2);
+        assert_eq!(s.running()[1].request.id, "big");
+    }
+
+    #[test]
+    fn lookahead_respects_aged_barrier_behind_the_head_and_slot_limit() {
+        use std::time::{Duration, Instant};
+        let mut s = Scheduler::new(1, 512);
+        s.enqueue(seq("new-head"));
+        let mut old = seq("old");
+        old.created_at = Instant::now() - Duration::from_secs(20);
+        s.enqueue(old);
+        s.enqueue(seq("small"));
+        assert_eq!(
+            s.admit_with_lookahead(3, Duration::from_secs(10), |r| r.id == "small"),
+            0
+        );
+        assert_eq!(
+            s.admit_with_lookahead(3, Duration::from_secs(10), |_| true),
+            1
+        );
+        assert_eq!(s.waiting_len(), 2);
     }
 
     #[test]

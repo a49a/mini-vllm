@@ -11,6 +11,10 @@ pub struct EngineConfig {
     pub max_batch_tokens: usize,
     /// Per-sequence prefill slice; the scheduler rotates between slices.
     pub max_prefill_chunk_tokens: usize,
+    /// Admission lookahead including the head; 1 preserves strict FIFO.
+    pub admission_lookahead: usize,
+    /// Stop bypassing requests once this queue age is reached.
+    pub admission_max_wait_ms: u64,
     /// Emit teaching traces (request ids/positions only, never prompt text).
     pub trace_requests: bool,
     /// Optional teaching JSONL file. Must not already exist.
@@ -46,6 +50,8 @@ impl Default for EngineConfig {
             max_num_seqs: 32,
             max_batch_tokens: 2048,
             max_prefill_chunk_tokens: 256,
+            admission_lookahead: 1,
+            admission_max_wait_ms: 1000,
             trace_requests: false,
             trace_jsonl: None,
             queue_timeout_ms: 0,
@@ -66,6 +72,7 @@ impl Default for EngineConfig {
 impl EngineConfig {
     pub fn validate(&self) -> crate::Result<()> {
         for (name, value) in [
+            ("admission_lookahead", self.admission_lookahead),
             ("max_model_len", self.max_model_len),
             ("max_num_seqs", self.max_num_seqs),
             ("max_batch_tokens", self.max_batch_tokens),
@@ -80,6 +87,11 @@ impl EngineConfig {
             if value == 0 {
                 return Err(crate::Error::InvalidRequest(format!("{name} must be > 0")));
             }
+        }
+        if self.admission_lookahead > 1 && self.admission_max_wait_ms == 0 {
+            return Err(crate::Error::InvalidRequest(
+                "lookahead admission requires admission_max_wait_ms > 0".into(),
+            ));
         }
         if self.max_model_len > u32::MAX as usize || self.max_kv_tokens < self.kv_block_size {
             return Err(crate::Error::InvalidRequest(
@@ -110,6 +122,15 @@ mod tests {
     #[test]
     fn runtime_limits_are_validated_before_channels_or_allocations() {
         for cfg in [
+            EngineConfig {
+                admission_lookahead: 0,
+                ..EngineConfig::default()
+            },
+            EngineConfig {
+                admission_lookahead: 2,
+                admission_max_wait_ms: 0,
+                ..EngineConfig::default()
+            },
             EngineConfig {
                 event_channel_capacity: 0,
                 ..EngineConfig::default()
