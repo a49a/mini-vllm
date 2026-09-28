@@ -1,0 +1,24 @@
+[package]
+name = "mini-vllm-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Qwen2-style decoder-only model implementation for mini-vllm-rs"
+
+[features]
+default = []
+# Backend features are enabled from the CLI crate (metal on macOS by default).
+metal = ["candle-core/metal"]
+cuda = ["candle-core/cuda"]
+
+[dependencies]
+candle-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+mini-vllm-kv = { workspace = true }
+
+[dev-dependencies]
+sha2 = "0.10"
