@@ -1,0 +1,17 @@
+[package]
+name = "mini-vllm-tokenizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Tokenizer and chat template for mini-vllm-rs"
+
+[dependencies]
+tokenizers = { workspace = true }
+thiserror = { workspace = true }
+mini-vllm-core = { workspace = true }
+
+[features]
+default = []
+# In-memory test tokenizer fixtures.
+test-util = []
