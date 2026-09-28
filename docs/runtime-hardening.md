@@ -1,6 +1,6 @@
 # Trace shutdown and prefix metadata / 追踪关闭与前缀元数据
 
-Trace events still use a bounded nonblocking queue. Dropping the writer closes that queue and waits up to 250 ms for the worker to flush. Normal shutdown drains queued events. A blocked filesystem write cannot be cancelled safely; on timeout the worker is detached, shutdown continues, and the trace may be incomplete. Library callers may use `TraceWriter::shutdown(Duration)` for an explicit budget; its boolean reports completion within that budget, not write success.
+Trace events still use a bounded nonblocking queue. Dropping the writer closes that queue and waits up to 250 ms for the worker to flush. Normal shutdown drains queued events. A blocked filesystem write cannot be cancelled safely; on timeout the worker is detached, shutdown continues, and the trace may be incomplete. Library callers may use `TraceWriter::shutdown(Duration)` for an explicit budget; `TraceShutdown` reports `Complete`, `Failed`, or `TimedOut`. The first outcome is retained: repeated calls return the same result without waiting or incrementing counters. A timed-out worker finishing later does not change that outcome.
 
 追踪关闭最多等待 250 毫秒。正常情况下会写完队列并 flush；文件系统阻塞时会记录超时并让关闭流程继续，文件可能不完整。底层阻塞 I/O 不会被强行取消。
 
