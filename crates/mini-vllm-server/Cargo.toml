@@ -1,0 +1,25 @@
+[package]
+name = "mini-vllm-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "OpenAI-compatible HTTP server for mini-vllm-rs"
+
+[dependencies]
+mini-vllm-core = { workspace = true }
+mini-vllm-engine = { workspace = true }
+mini-vllm-tokenizer = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }
+mini-vllm-model = { workspace = true }
+mini-vllm-tokenizer = { workspace = true, features = ["test-util"] }
+candle-core = { workspace = true }
