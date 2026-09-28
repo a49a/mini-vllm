@@ -121,8 +121,19 @@ impl Attention {
     /// accumulates maxima, normalization and values without concatenating scores. This is a portable reference,
     /// not a fused GPU PagedAttention kernel.
     fn attend_pages(&self, q: &Tensor, pages: &[(Tensor, Tensor)]) -> Result<Tensor> {
+        self.attend_pages_impl::<false>(q, pages)
+    }
+
+    // EXPANDED=true retains the previous implementation for numerical and
+    // timing comparisons in tests. Production specializes the grouped path.
+    fn attend_pages_impl<const EXPANDED: bool>(
+        &self,
+        q: &Tensor,
+        pages: &[(Tensor, Tensor)],
+    ) -> Result<Tensor> {
         let group = self.num_heads / self.num_kv_heads;
         let q_len = q.dim(1)?;
+        let grouped_q = q.reshape((self.num_kv_heads, group * q_len, self.head_dim))?;
         let kv_len: usize = pages
             .iter()
             .map(|(k, _)| k.dim(1))
@@ -142,13 +153,24 @@ impl Attention {
             if len == 0 {
                 candle_core::bail!("empty attention page");
             }
-            let k = repeat_kv(k, group)?;
-            let v = repeat_kv(v, group)?.to_dtype(DType::F32)?;
-            let mut scores = q
-                .matmul(&k.transpose(1, 2)?)?
-                .to_dtype(DType::F32)?
-                .affine(self.scale, 0.0)?;
-            if q_len > 1 {
+            // Fold query groups into the query dimension instead of physically
+            // duplicating every KV head. The KV tensors stay block-addressed.
+            let v = if EXPANDED {
+                repeat_kv(v, group)?
+            } else {
+                v.clone()
+            }
+            .to_dtype(DType::F32)?;
+            let mut scores = if EXPANDED {
+                q.matmul(&repeat_kv(k, group)?.transpose(1, 2)?)?
+            } else {
+                grouped_q
+                    .matmul(&k.transpose(1, 2)?.contiguous()?)?
+                    .reshape((self.num_heads, q_len, len))?
+            }
+            .to_dtype(DType::F32)?
+            .affine(self.scale, 0.0)?;
+            if q_len > 1 && (EXPANDED || offset + len - 1 > query_start) {
                 let mask: Vec<f32> = (0..q_len)
                     .flat_map(|i| {
                         (0..len).map(move |j| {
@@ -172,7 +194,14 @@ impl Attention {
             // later fully masked pages contribute zero without -inf - -inf.
             let weights = scores.broadcast_sub(&maximum)?.exp()?;
             let denominator = weights.sum(2)?.unsqueeze(2)?;
-            let numerator = weights.matmul(&v)?;
+            let numerator = if EXPANDED {
+                weights.matmul(&v)?
+            } else {
+                weights
+                    .reshape((self.num_kv_heads, group * q_len, len))?
+                    .matmul(&v)?
+                    .reshape((self.num_heads, q_len, self.head_dim))?
+            };
             state = Some(match previous {
                 None => (maximum, denominator, numerator),
                 Some((m, l, o)) => {
@@ -432,6 +461,76 @@ mod tests {
         assert_eq!(out, vec![1.0, 1.0, 2.0, 2.0]);
     }
     #[test]
+    #[ignore = "opt-in CPU timing experiment; not a performance assertion"]
+    fn paged_attention_timing() {
+        let mut cfg = tiny_cfg();
+        cfg.hidden_size = 896;
+        cfg.num_attention_heads = 14;
+        cfg.num_key_value_heads = 2;
+        let attn = attention(&cfg);
+        let make = |heads, len| {
+            Tensor::from_vec(
+                (0..heads * len * cfg.head_dim())
+                    .map(|i| ((i % 17) as f32 - 8.) * 0.01)
+                    .collect::<Vec<_>>(),
+                (heads, len, cfg.head_dim()),
+                &Device::Cpu,
+            )
+            .unwrap()
+        };
+        for context in [256, 1024] {
+            let k = make(2, context);
+            let v = make(2, context);
+            let pages: Vec<_> = (0..context)
+                .step_by(16)
+                .map(|start| {
+                    (
+                        k.narrow(1, start, 16).unwrap().contiguous().unwrap(),
+                        v.narrow(1, start, 16).unwrap().contiguous().unwrap(),
+                    )
+                })
+                .collect();
+            for qlen in [1, 16] {
+                let q = make(14, qlen);
+                let old = attn
+                    .attend_pages_impl::<true>(&q, &pages)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<f32>()
+                    .unwrap();
+                let new = attn
+                    .attend_pages(&q, &pages)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<f32>()
+                    .unwrap();
+                assert!(old.iter().zip(&new).all(|(a, b)| (a - b).abs() < 1e-4));
+                let mut timings = [Vec::new(), Vec::new()];
+                for trial in 0..5 {
+                    for mode in if trial % 2 == 0 { [0, 1] } else { [1, 0] } {
+                        let start = std::time::Instant::now();
+                        for _ in 0..10 {
+                            let out = if mode == 0 {
+                                attn.attend_pages_impl::<true>(&q, &pages)
+                            } else {
+                                attn.attend_pages(&q, &pages)
+                            }
+                            .unwrap();
+                            std::hint::black_box(
+                                out.flatten_all().unwrap().to_vec1::<f32>().unwrap(),
+                            );
+                        }
+                        timings[mode].push(start.elapsed().as_secs_f64() * 100.);
+                    }
+                }
+                println!("ATTENTION_TIMING {{\"context\":{context},\"query_tokens\":{qlen},\"expanded_ms\":{:?},\"grouped_ms\":{:?}}}", timings[0], timings[1]);
+            }
+        }
+    }
+
+    #[test]
     fn online_softmax_matches_dense_with_future_pages_and_extreme_scores() {
         let cfg = tiny_cfg();
         let attn = attention(&cfg);
@@ -467,6 +566,17 @@ mod tests {
                     .unwrap()
                     .to_vec1::<f32>()
                     .unwrap();
+                let expanded = attn
+                    .attend_pages_impl::<true>(&q, &pages)
+                    .unwrap()
+                    .flatten_all()
+                    .unwrap()
+                    .to_vec1::<f32>()
+                    .unwrap();
+                assert!(expanded
+                    .iter()
+                    .zip(&expected)
+                    .all(|(a, b)| (a - b).abs() < 0.0001));
                 let actual = attn
                     .attend_pages(&q, &pages)
                     .unwrap()
